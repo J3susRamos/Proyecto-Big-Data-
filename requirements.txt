@@ -1,0 +1,15 @@
+# =============================================================================
+# requirements.txt — Dependencias del pipeline Lambda Hidrandina
+# =============================================================================
+# PySpark requiere Java 11 instalado en el sistema, no en pip.
+# Ver Dockerfile para la instalacion de OpenJDK 11.
+
+pyspark==4.1.2
+kafka-python==2.3.1
+pandas==3.0.3
+pyarrow==24.0.0
+matplotlib==3.10.9
+numpy
+faker==40.19.1
+openpyxl==3.1.5
+python-dotenv==1.1.0

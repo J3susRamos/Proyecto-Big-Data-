@@ -1,0 +1,50 @@
+# =============================================================================
+# .dockerignore — Excluir archivos grandes e innecesarios del contexto Docker
+# =============================================================================
+
+# Archivos de datos grandes (no deben ir en la imagen)
+data/*.csv
+data/*.parquet
+data/*.json
+!data/.gitkeep
+
+# Resultados generados por las capas batch y streaming
+serving_layer/batch_results/
+serving_layer/stream_results/
+serving_layer/*.csv
+serving_layer/*.png
+serving_layer/*.json
+
+# Resultados de speed layer
+speed_layer/FACT_ANOMALIAS_STREAM/
+speed_layer/*.csv
+
+# Cache de Python y compilados
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Control de versiones
+.git/
+.gitignore
+.gitattributes
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+*.egg-info/
+
+# IDE y editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Checkpoints de Spark streaming
+checkpoint/
+
+# Archivos de sistema
+Thumbs.db
+.DS_Store

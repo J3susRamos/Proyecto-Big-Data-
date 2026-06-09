@@ -1,0 +1,54 @@
+# =============================================================================
+# .gitignore — Proyecto Hidrandina (Arquitectura Lambda)
+# =============================================================================
+
+# ── Archivos de datos (NO SUBIR A GITHUB) ────────────────────────────────
+# Los CSV de Hidrandina son varios GB. Descargar por separado.
+data/*.csv
+data/*.parquet
+data/*.json
+!data/.gitkeep
+
+# ── Resultados generados ─────────────────────────────────────────────────
+serving_layer/batch_results/
+serving_layer/stream_results/
+serving_layer/*.csv
+serving_layer/*.png
+serving_layer/*.json
+
+# Resultados de speed layer
+speed_layer/FACT_ANOMALIAS_STREAM/
+speed_layer/*.csv
+
+# ── Cache de Python ──────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyc
+*.egg-info/
+
+# ── Spark ────────────────────────────────────────────────────────────────
+checkpoint/
+spark-warehouse/
+derby.log
+metastore_db/
+
+# ── Entornos virtuales ───────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Sistema ──────────────────────────────────────────────────────────────
+Thumbs.db
+.DS_Store
+
+# -- Variables de entorno (NO SUBIR) --
+.env
+.env.local

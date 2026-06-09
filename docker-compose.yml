@@ -1,0 +1,109 @@
+# =============================================================================
+# docker-compose.yml — Arquitectura Lambda Hidrandina
+# =============================================================================
+# Servicios:
+#   zookeeper  - Coordinacion de Kafka
+#   kafka      - Broker de mensajes para el Speed Layer
+#   pipeline   - Pipeline completo (Loader + Batch + Producer + Streaming + Serving)
+# =============================================================================
+
+services:
+
+  # ── Zookeeper (requerido por Kafka) ────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: hidrandina-zookeeper
+    hostname: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+    healthcheck:
+      test: echo srvr | nc -w 2 localhost 2181 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hidrandina-net
+
+  # ── Kafka Broker ───────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: hidrandina-kafka
+    hostname: kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_DELETE_TOPIC_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list || exit 1
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - hidrandina-net
+
+  # ── Pipeline Principal ───────────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hidrandina-pipeline
+    hostname: pipeline
+    depends_on:
+      kafka:
+        condition: service_healthy
+      zookeeper:
+        condition: service_healthy
+    environment:
+      # Kafka (usa nombre del servicio docker-compose como hostname)
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: hidrandina-consumo
+
+      # Spark
+      SPARK_MASTER: local[*]
+
+      # Rutas dentro del contenedor
+      RUTA_PROYECTO: /app
+      RUTA_DATA: /app/data
+      RUTA_SERVING: /app/output
+      RUTA_CSV_ORIGINALES: /app/data/originales
+
+      # Python
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      # Mapear los CSV de datos (crear carpeta local con los CSV de Hidrandina)
+      - ./data:/app/data
+      # Resultados persistentes fuera del contenedor
+      - ./serving_layer:/app/output
+    # Asignar suficiente memoria para procesar 30 millones de registros
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+        reservations:
+          memory: 4g
+    networks:
+      - hidrandina-net
+
+# ── Red compartida ──────────────────────────────────────────────────────
+networks:
+  hidrandina-net:
+    driver: bridge
