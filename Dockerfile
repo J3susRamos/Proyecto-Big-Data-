@@ -1,7 +1,7 @@
 # =============================================================================
 # Dockerfile — Pipeline Lambda Hidrandina (PySpark + Kafka)
 # =============================================================================
-# Base: Python 3.11 slim + OpenJDK 11 (requerido por Spark)
+# Base: Python 3.11 slim + OpenJDK 17 (requerido por Spark)
 # =============================================================================
 
 FROM python:3.11-slim
@@ -12,17 +12,17 @@ LABEL description="Arquitectura Lambda para deteccion de anomalias en consumo el
 # ── Evitar prompts interactivos ──────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Instalar Java 11 (requerido por PySpark) ─────────────────────────────
+# ── Instalar Java 17 (requerido por PySpark) ─────────────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        openjdk-11-jdk-headless \
+        openjdk-17-jdk-headless \
         wget \
         ca-certificates \
         procps \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Variables de entorno Java y Spark ────────────────────────────────────
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV SPARK_HOME=/opt/spark
 ENV PATH="$SPARK_HOME/bin:$PATH"
 ENV PYSPARK_PYTHON=python3
