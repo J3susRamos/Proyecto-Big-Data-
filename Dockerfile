@@ -15,7 +15,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ── Instalar Java 17 (requerido por PySpark) ─────────────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        openjdk-17-jdk-headless \
+        default-jdk-headless \
         wget \
         ca-certificates \
         procps \
