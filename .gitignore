@@ -4,11 +4,12 @@
 
 # ── Archivos de datos (NO SUBIR A GITHUB) ────────────────────────────────
 # Los CSV de Hidrandina son varios GB. Descargar por separado.
-data/originales/*.csv
-data/originales/*.xlsx
-data/*.parquet
-data/*.json
+data/**/*.csv
+data/**/*.parquet
+data/**/*.json
+data/**/*.xlsx
 !data/.gitkeep
+!data/originales/.gitkeep
 
 # ── Resultados generados ─────────────────────────────────────────────────
 serving_layer/batch_results/
@@ -45,6 +46,10 @@ env/
 .idea/
 *.swp
 *.swo
+
+# ── Graficos generados ───────────────────────────────────────────────────
+*.png
+!serving_layer/batch_results/.gitkeep
 
 # ── Sistema ──────────────────────────────────────────────────────────────
 Thumbs.db

@@ -26,7 +26,7 @@ warnings.filterwarnings("ignore")
 
 RUTA_CSV = os.environ.get(
     "RUTA_CSV_ORIGINALES",
-    r"C:\Users\Roxwell\Desktop\Datos proyecto big data"
+    os.path.join(os.path.dirname(__file__), "..", "data", "originales")
 )
 RUTA_DATA = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
 RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "..", "serving_layer"))
