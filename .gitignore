@@ -4,7 +4,8 @@
 
 # ── Archivos de datos (NO SUBIR A GITHUB) ────────────────────────────────
 # Los CSV de Hidrandina son varios GB. Descargar por separado.
-data/*.csv
+data/originales/*.csv
+data/originales/*.xlsx
 data/*.parquet
 data/*.json
 !data/.gitkeep
