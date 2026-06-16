@@ -30,7 +30,8 @@ from pyspark.sql.functions import (
     col, from_json, when, lit, current_timestamp, expr, struct,
     to_json, udf, count as spark_count, avg as spark_avg,
     stddev as spark_stddev, round as spark_round, abs as spark_abs,
-    coalesce, isnan, isnull, monotonically_increasing_id
+    coalesce, isnan, isnull, monotonically_increasing_id, concat,
+    hour, sum as spark_sum
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType, IntegerType,
@@ -53,7 +54,7 @@ KAFKA_CHECKPOINT = os.path.join(
 )
 
 
-def crear_spark_session(app_name="Hidrandina-Speed-Layer"):
+def create_spark_session(app_name="Hidrandina-Speed-Layer"):
     """
     Crea y configura la sesion de Spark para streaming.
 
@@ -64,9 +65,22 @@ def crear_spark_session(app_name="Hidrandina-Speed-Layer"):
         SparkSession: Sesion de Spark configurada.
     """
     try:
+        # Configurar HADOOP_HOME para Windows (winutils.exe necesario para Parquet)
+        hadoop_home = "C:\\hadoop"
+        os.environ.setdefault("HADOOP_HOME", hadoop_home)
+        os.environ.setdefault("hadoop.home.dir", hadoop_home)
+        # PYSPARK_PYTHON explicito para evitar el stub de Microsoft Store
+        python_path = "C:\\Users\\Roxwell\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+        os.environ.setdefault("PYSPARK_PYTHON", python_path)
+        os.environ.setdefault("PYSPARK_DRIVER_PYTHON", python_path)
+        hadoop_bin = f"{hadoop_home}\\bin"
+        if hadoop_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{hadoop_bin};{os.environ.get('PATH', '')}"
+
         spark = (
             SparkSession.builder
             .appName(app_name)
+            .config("spark.hadoop.hadoop.home.dir", hadoop_home)
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.sql.session.timeZone", "America/Lima")
             .config("spark.sql.streaming.schemaInference", "true")
@@ -84,29 +98,35 @@ def crear_spark_session(app_name="Hidrandina-Speed-Layer"):
         raise
 
 
-def leer_estadisticas_historicas(spark, ruta=None):
+def read_historical_statistics(spark, path=None):
     """
     Lee TMP_ESTADISTICAS_HISTORICAS desde Parquet.
 
     Parametros:
         spark (SparkSession): Sesion de Spark.
-        ruta (str): Ruta al Parquet.
+        path (str): Ruta al Parquet.
 
     Retorna:
         DataFrame: Estadisticas historicas por distrito.
     """
     try:
-        if ruta is None:
-            ruta = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS")
+        if path is None:
+            path = os.path.join(RUTA_SERVING, "batch_results", "tmp_estadisticas_historicas")
 
-        if not os.path.exists(ruta):
-            print(f"ERROR: No se encuentra TMP_ESTADISTICAS_HISTORICAS en {ruta}")
+        if not os.path.exists(path):
+            # Fallback: buscar en RUTA_DATA directamente
+            path = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS")
+
+        if not os.path.exists(path):
+            print(f"ERROR: No se encuentra TMP_ESTADISTICAS_HISTORICAS")
+            print("  Buscado en: batch_results/tmp_estadisticas_historicas")
+            print("  Buscado en: data/TMP_ESTADISTICAS_HISTORICAS")
             print("  Ejecute primero batch_layer/spark_batch.py")
             return None
 
-        df = spark.read.parquet(ruta)
-        num_filas = df.count()
-        print(f"TMP_ESTADISTICAS_HISTORICAS leido: {num_filas:,} filas")
+        df = spark.read.parquet(path)
+        num_rows = df.count()
+        print(f"TMP_ESTADISTICAS_HISTORICAS leido: {num_rows:,} filas")
         print(f"  Columnas: {df.columns}")
         return df
     except Exception as e:
@@ -114,7 +134,7 @@ def leer_estadisticas_historicas(spark, ruta=None):
         return None
 
 
-def definir_esquema_evento():
+def define_event_schema():
     """
     Define el esquema JSON para los eventos de consumo.
 
@@ -140,7 +160,7 @@ def definir_esquema_evento():
     ])
 
 
-def leer_stream_kafka(spark):
+def read_kafka_stream(spark):
     """
     Configura lectura en streaming desde Kafka.
 
@@ -157,8 +177,8 @@ def leer_stream_kafka(spark):
             .format("kafka")
             .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
             .option("subscribe", KAFKA_TOPIC)
-            .option("startingOffsets", "latest")
-            .option("maxOffsetsPerTrigger", 10000)
+            .option("startingOffsets", "earliest")
+            .option("maxOffsetsPerTrigger", 50000)
             .option("failOnDataLoss", "false")
             .load()
         )
@@ -170,32 +190,32 @@ def leer_stream_kafka(spark):
         return None
 
 
-def leer_stream_simulado(spark, ruta=None):
+def read_simulated_stream(spark, path=None):
     """
     Configura lectura en streaming simulado desde archivo JSON.
     Usa rate stream para generar micro-batches con los eventos.
 
     Parametros:
         spark (SparkSession): Sesion de Spark.
-        ruta (str): Ruta al archivo JSON simulado.
+        path (str): Ruta al archivo JSON simulado.
 
     Retorna:
         DataFrame: Stream simulado, o None si falla.
     """
     try:
-        if ruta is None:
-            ruta = os.path.join(RUTA_DATA, "eventos_simples.json")
+        if path is None:
+            path = os.path.join(RUTA_DATA, "eventos_simples.json")
 
-        if not os.path.exists(ruta):
-            print(f"ERROR: No se encuentra archivo simulado en {ruta}")
+        if not os.path.exists(path):
+            print(f"ERROR: No se encuentra archivo simulado en {path}")
             return None
 
-        print(f"Configurando streaming SIMULADO desde: {ruta}")
+        print(f"Configurando streaming SIMULADO desde: {path}")
 
         # Leer el archivo completo como DataFrame batch
         spark.sparkContext.setLogLevel("ERROR")
 
-        with open(ruta, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             eventos = json.load(f)
 
         if not eventos:
@@ -230,19 +250,19 @@ def leer_stream_simulado(spark, ruta=None):
         df_rate_indexed = df_rate.withColumn("idx", monotonically_increasing_id())
 
         # Crear DataFrame estatico con indice
-        df_eventos = df_estatico.withColumn(
+        events_df = df_estatico.withColumn(
             "idx", monotonically_increasing_id()
         )
 
         # Cachear el DataFrame estatico
-        df_eventos.cache()
-        num_eventos = df_eventos.count()
+        events_df.cache()
+        num_eventos = events_df.count()
         print(f"  Eventos cargados en memoria: {num_eventos:,}")
 
         # JOIN: cada micro-batch del rate se une con un evento
         df_stream = df_rate_indexed.join(
-            df_eventos,
-            df_rate_indexed.idx == df_eventos.idx,
+            events_df,
+            df_rate_indexed.idx == events_df.idx,
             "left"
         ).select(
             col("key"),
@@ -263,7 +283,7 @@ def leer_stream_simulado(spark, ruta=None):
         return None
 
 
-def parsear_evento(df_kafka, esquema):
+def parse_event(df_kafka, schema):
     """
     Parsea el valor JSON de Kafka a columnas estructuradas.
 
@@ -271,7 +291,7 @@ def parsear_evento(df_kafka, esquema):
 
     Parametros:
         df_kafka (DataFrame): DataFrame crudo de Kafka.
-        esquema (StructType): Esquema del evento JSON.
+        schema (StructType): Esquema del evento JSON.
 
     Retorna:
         DataFrame: Eventos parseados con columnas estructuradas.
@@ -279,7 +299,7 @@ def parsear_evento(df_kafka, esquema):
     try:
         df_parseado = (
             df_kafka
-            .withColumn("value_parsed", from_json(col("value").cast("string"), esquema))
+            .withColumn("value_parsed", from_json(col("value").cast("string"), schema))
             .select(
                 col("key").cast("string").alias("nro_servicio_key"),
                 col("value_parsed.NRO_SERVICIO").cast(LongType()).alias("NRO_SERVICIO"),
@@ -310,7 +330,7 @@ def parsear_evento(df_kafka, esquema):
         return df_kafka
 
 
-def enriquecer_eventos(df_eventos, estadisticas):
+def enrich_events(df_events, statistics_df):
     """
     Genera TMP_CONSUMO_ENRIQUECIDO: JOIN con estadisticas historicas
     y calculo de z-score y porcentaje de variacion.
@@ -321,8 +341,8 @@ def enriquecer_eventos(df_eventos, estadisticas):
         desviacion_consumo, zscore_consumo, porcentaje_variacion
 
     Parametros:
-        df_eventos (DataFrame): Eventos parseados.
-        estadisticas (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
+        df_events (DataFrame): Eventos parseados.
+        statistics_df (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
 
     Retorna:
         DataFrame: Eventos enriquecidos con estadisticas.
@@ -330,47 +350,49 @@ def enriquecer_eventos(df_eventos, estadisticas):
     try:
         print("=== GENERANDO TMP_CONSUMO_ENRIQUECIDO ===")
 
-        # JOIN con estadisticas por DISTRITO
-        df_enriquecido = df_eventos.join(
-            estadisticas.select(
+        # JOIN con estadisticas por DISTRITO, TARIFA y CARTERA (FIX 4 APLICADO)
+        enriched_df = df_events.join(
+            statistics_df.select(
                 "DISTRITO",
-                "promedio_consumo",
-                "promedio_importe",
-                "desviacion_consumo"
+                "TARIFA",
+                "CARTERA",
+                "consumo_promedio",
+                "importe_promedio",
+                "consumo_std"
             ),
-            on="DISTRITO",
+            on=["DISTRITO", "TARIFA", "CARTERA"],
             how="left"
         )
 
         # Calcular z-score y porcentaje de variacion
-        df_enriquecido = df_enriquecido.withColumn(
+        enriched_df = enriched_df.withColumn(
             "zscore_consumo",
             when(
-                (col("desviacion_consumo").isNull()) | (col("desviacion_consumo") == 0),
+                (col("consumo_std").isNull()) | (col("consumo_std") == 0),
                 lit(0.0)
             ).otherwise(
                 spark_round(
-                    (col("CONSUMO") - col("promedio_consumo")) / col("desviacion_consumo"),
+                    (col("CONSUMO") - col("consumo_promedio")) / col("consumo_std"),
                     4
                 )
             )
         )
 
-        df_enriquecido = df_enriquecido.withColumn(
+        enriched_df = enriched_df.withColumn(
             "porcentaje_variacion",
             when(
-                (col("promedio_consumo").isNull()) | (col("promedio_consumo") == 0),
+                (col("consumo_promedio").isNull()) | (col("consumo_promedio") == 0),
                 lit(0.0)
             ).otherwise(
                 spark_round(
-                    ((col("CONSUMO") - col("promedio_consumo")) / col("promedio_consumo")) * 100,
+                    ((col("CONSUMO") - col("consumo_promedio")) / col("consumo_promedio")) * 100,
                     2
                 )
             )
         )
 
         # Seleccionar las 12 columnas de TMP_CONSUMO_ENRIQUECIDO
-        df_enriquecido = df_enriquecido.select(
+        enriched_df = enriched_df.select(
             col("NRO_SERVICIO"),
             col("PERIODO"),
             col("CONSUMO").alias("consumo_actual"),
@@ -378,27 +400,27 @@ def enriquecer_eventos(df_eventos, estadisticas):
             col("DISTRITO"),
             col("TARIFA"),
             col("CARTERA"),
-            col("promedio_consumo").alias("consumo_promedio_historico"),
-            col("promedio_importe").alias("importe_promedio_historico"),
-            col("desviacion_consumo").alias("desviacion_consumo"),
+            col("consumo_promedio").alias("consumo_promedio_historico"),
+            col("importe_promedio").alias("importe_promedio_historico"),
+            col("consumo_std").alias("desviacion_consumo"),
             col("zscore_consumo"),
             col("porcentaje_variacion")
         )
 
         print(f"  Registros enriquecidos")
-        print(f"  Columnas TMP_CONSUMO_ENRIQUECIDO: {df_enriquecido.columns}")
-        print(f"  Total columnas: {len(df_enriquecido.columns)}")
+        print(f"  Columnas TMP_CONSUMO_ENRIQUECIDO: {enriched_df.columns}")
+        print(f"  Total columnas: {len(enriched_df.columns)}")
         print("=== ENRIQUECIMIENTO COMPLETADO ===")
 
-        return df_enriquecido
+        return enriched_df
     except Exception as e:
         print(f"ERROR enriqueciendo eventos: {e}")
         import traceback
         traceback.print_exc()
-        return df_eventos
+        return events_df
 
 
-def clasificar_anomalias(df_enriquecido):
+def classify_anomalies(enriched_df):
     """
     Aplica reglas Spark para clasificar tipo_anomalia y nivel_riesgo.
 
@@ -415,7 +437,7 @@ def clasificar_anomalias(df_enriquecido):
         - otro: "Bajo"
 
     Parametros:
-        df_enriquecido (DataFrame): TMP_CONSUMO_ENRIQUECIDO.
+        enriched_df (DataFrame): TMP_CONSUMO_ENRIQUECIDO.
 
     Retorna:
         DataFrame: Con columnas tipo_anomalia y nivel_riesgo anadidas.
@@ -423,7 +445,7 @@ def clasificar_anomalias(df_enriquecido):
     try:
         print("=== CLASIFICANDO ANOMALIAS ===")
 
-        df_anomalias = df_enriquecido.withColumn(
+        anomalies_df = enriched_df.withColumn(
             "tipo_anomalia",
             when(col("zscore_consumo") > 3, lit("Consumo extremadamente alto"))
             .when(
@@ -435,7 +457,7 @@ def clasificar_anomalias(df_enriquecido):
             .otherwise(lit("Variacion moderada"))
         )
 
-        df_anomalias = df_anomalias.withColumn(
+        anomalies_df = anomalies_df.withColumn(
             "nivel_riesgo",
             when(col("zscore_consumo") > 3, lit("Alto"))
             .when(
@@ -446,7 +468,7 @@ def clasificar_anomalias(df_enriquecido):
         )
 
         # Anadir columnas fijas
-        df_anomalias = df_anomalias.withColumn(
+        anomalies_df = anomalies_df.withColumn(
             "fecha_deteccion",
             current_timestamp()
         ).withColumn(
@@ -454,118 +476,210 @@ def clasificar_anomalias(df_enriquecido):
             lit(True)
         )
 
+        # ── Regla adicional independiente del z-score ────────────────
+        # Si CONSUMO > 500, riesgo es Crítico siempre
+        anomalies_df = anomalies_df.withColumn(
+            "nivel_riesgo",
+            when(col("consumo_actual") > 500, lit("Crítico"))
+            .otherwise(col("nivel_riesgo"))
+        )
+        # Si CONSUMO > 500 y no había anomalía por z-score, alerta específica
+        anomalies_df = anomalies_df.withColumn(
+            "tipo_anomalia",
+            when(
+                (col("consumo_actual") > 500) & (col("tipo_anomalia") == "Variacion moderada"),
+                lit("Alerta consumo crítico > 500 kWh")
+            ).otherwise(col("tipo_anomalia"))
+        )
+
         # Distribucion de tipos de anomalia
         print("  Distribucion tipo_anomalia (estimada):")
-        df_anomalias.groupBy("tipo_anomalia").agg(
+        anomalies_df.groupBy("tipo_anomalia").agg(
             spark_count("*").alias("cantidad")
         ).show(truncate=False)
 
         print("  Distribucion nivel_riesgo (estimada):")
-        df_anomalias.groupBy("nivel_riesgo").agg(
+        anomalies_df.groupBy("nivel_riesgo").agg(
             spark_count("*").alias("cantidad")
         ).show(truncate=False)
 
         print("=== CLASIFICACION COMPLETADA ===")
-        return df_anomalias
+        return anomalies_df
 
     except Exception as e:
         print(f"ERROR clasificando anomalias: {e}")
-        return df_enriquecido
+        return enriched_df
 
 
-def guardar_streaming_output(df_anomalias, ruta_salida=None, checkpoint=None):
+def save_streaming_output(anomalies_df, output_path=None, checkpoint_path=None):
     """
     Guarda el stream de anomalias en Parquet usando append output mode.
 
     Parametros:
-        df_anomalias (DataFrame): Stream con anomalias clasificadas.
-        ruta_salida (str): Ruta de salida Parquet.
-        checkpoint (str): Ruta para checkpointing.
+        anomalies_df (DataFrame): Stream con anomalias clasificadas.
+        output_path (str): Ruta de salida Parquet.
+        checkpoint_path (str): Ruta para checkpointing.
 
     Retorna:
         StreamingQuery: La consulta de streaming.
     """
     try:
-        if ruta_salida is None:
-            ruta_salida = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
+        if output_path is None:
+            output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
 
-        if checkpoint is None:
-            checkpoint = os.path.join(
+        if checkpoint_path is None:
+            checkpoint_path = os.path.join(
                 os.environ.get("RUTA_PROYECTO", os.path.dirname(os.path.dirname(__file__))),
                 "checkpoint", "anomalias_stream"
             )
 
-        os.makedirs(os.path.dirname(checkpoint), exist_ok=True)
+        os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
         query = (
-            df_anomalias
+            anomalies_df
             .writeStream
             .outputMode("append")
             .format("parquet")
-            .option("path", ruta_salida)
-            .option("checkpointLocation", checkpoint)
+            .option("path", output_path)
+            .option("checkpointLocation", checkpoint_path)
             .trigger(processingTime="5 seconds")
             .start()
         )
 
-        print(f"Streaming guardando en: {ruta_salida}")
+        print(f"Streaming guardando en: {output_path}")
         return query
     except Exception as e:
         print(f"ERROR guardando streaming output: {e}")
         return None
 
 
-def procesar_stream_batch(df_enriquecido, epoch_id):
+def calculate_region_hourly_accumulation(enriched_df):
+    """
+    Calcula acumulacion regional por hora a partir de eventos enriquecidos.
+
+    Agrupa por DISTRITO + hora de fecha_deteccion:
+        - total_kwh: suma de consumo_actual
+        - total_records: count de registros
+        - avg_consumption: promedio de consumo_actual
+        - anomaly_count: count donde flag_anomalia = True
+
+    Guarda JSON en data/region_hourly_accumulation.json.
+
+    Parametros:
+        enriched_df (DataFrame): TMP_CONSUMO_ENRIQUECIDO.
+
+    Retorna:
+        DataFrame: region_hourly_df ordenado por DISTRITO, hour.
+    """
+    try:
+        print("=== CALCULANDO ACUMULACION REGIONAL POR HORA ===")
+
+        region_hourly_df = (
+            enriched_df
+            .withColumn("hour", hour(col("fecha_deteccion")))
+            .groupBy("DISTRITO", "hour")
+            .agg(
+                spark_sum("consumo_actual").alias("total_kwh"),
+                spark_count("*").alias("total_records"),
+                spark_avg("consumo_actual").alias("avg_consumption"),
+                spark_sum(
+                    when(col("flag_anomalia") == True, lit(1)).otherwise(lit(0))
+                ).alias("anomaly_count"),
+            )
+            .select(
+                "DISTRITO",
+                "hour",
+                spark_round("total_kwh", 2).alias("total_kwh"),
+                "total_records",
+                spark_round("avg_consumption", 2).alias("avg_consumption"),
+                "anomaly_count",
+            )
+            .orderBy("DISTRITO", "hour")
+        )
+
+        rows = region_hourly_df.count()
+        print(f"  Total grupos DISTRITO×hora: {rows:,}")
+
+        # Guardar como JSON
+        output_path = os.path.join(RUTA_DATA, "region_hourly_accumulation.json")
+        local_rows = region_hourly_df.collect()
+        records = [
+            {
+                "distrito": r["DISTRITO"],
+                "hour": r["hour"],
+                "total_kwh": r["total_kwh"],
+                "total_records": r["total_records"],
+                "avg_consumption": r["avg_consumption"],
+                "anomaly_count": r["anomaly_count"],
+            }
+            for r in local_rows
+        ]
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2, ensure_ascii=False)
+        print(f"  Acumulacion regional por hora guardada en: {output_path}")
+
+        print("=== ACUMULACION REGIONAL COMPLETADA ===")
+        return region_hourly_df
+
+    except Exception as e:
+        print(f"ERROR calculando acumulacion regional: {e}")
+        import traceback
+        traceback.print_exc()
+        return enriched_df
+
+
+def process_stream_batch(enriched_df, epoch_id):
     """
     Funcion callback para foreachBatch: procesa cada micro-batch
     y guarda resultados intermedios.
 
     Parametros:
-        df_enriquecido (DataFrame): Micro-batch de datos enriquecidos.
+        enriched_df (DataFrame): Micro-batch de datos enriquecidos.
         epoch_id (int): ID del micro-batch.
     """
     try:
-        if df_enriquecido.count() == 0:
+        if enriched_df.count() == 0:
             return
 
         print(f"\n--- Procesando micro-batch {epoch_id} ---")
-        df_anomalias = clasificar_anomalias(df_enriquecido)
+        anomalies_df = classify_anomalies(enriched_df)
 
         # Guardar batch individual
-        ruta_batch = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
-        df_anomalias.write.mode("append").parquet(ruta_batch)
-        print(f"  Batch {epoch_id} guardado: {df_anomalias.count():,} registros")
+        output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
+        anomalies_df.write.mode("append").parquet(output_path)
+        print(f"  Batch {epoch_id} guardado: {anomalies_df.count():,} registros")
         print(f"--- Fin micro-batch {epoch_id} ---\n")
     except Exception as e:
         print(f"ERROR en micro-batch {epoch_id}: {e}")
 
 
-def modo_streaming_kafka(spark, estadisticas):
+def kafka_streaming_mode(spark, statistics_df):
     """
     Ejecuta el pipeline en modo streaming real con Kafka.
 
     Parametros:
         spark (SparkSession): Sesion de Spark.
-        estadisticas (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
+        statistics_df (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
     """
-    df_kafka = leer_stream_kafka(spark)
+    df_kafka = read_kafka_stream(spark)
     if df_kafka is None:
         return False
 
-    esquema = definir_esquema_evento()
-    df_eventos = parsear_evento(df_kafka, esquema)
-    df_enriquecido = enriquecer_eventos(df_eventos, estadisticas)
+    schema = define_event_schema()
+    df_events = parse_event(df_kafka, schema)
+    enriched_df = enrich_events(df_events, statistics_df)
 
-    query = guardar_streaming_output(df_enriquecido)
+    query = save_streaming_output(enriched_df)
     if query is None:
         print("ERROR: No se pudo iniciar la consulta de streaming.")
         return False
 
-    print("\nStreaming iniciado. Esperando datos de Kafka...")
-    print("Presione Ctrl+C para detener.")
+        print("\nStreaming iniciado. Procesando datos de Kafka...")
+        print("  Timeout: 300s (5 minutos)")
+        print("  Presione Ctrl+C para detener antes.")
 
-    try:
-        query.awaitTermination()
+        try:
+            query.awaitTermination(timeout=300)
     except KeyboardInterrupt:
         print("\nStreaming detenido por el usuario.")
         query.stop()
@@ -576,7 +690,7 @@ def modo_streaming_kafka(spark, estadisticas):
     return True
 
 
-def modo_streaming_simulado(spark, estadisticas):
+def simulated_streaming_mode(spark, statistics_df):
     """
     Ejecuta el pipeline en modo simulado (sin Kafka).
 
@@ -585,41 +699,29 @@ def modo_streaming_simulado(spark, estadisticas):
 
     Parametros:
         spark (SparkSession): Sesion de Spark.
-        estadisticas (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
+        statistics_df (DataFrame): TMP_ESTADISTICAS_HISTORICAS.
 
     Retorna:
         bool: True si se proceso correctamente.
     """
     print("\n=== MODO SIMULADO (sin Kafka) ===")
 
-    ruta_eventos = os.path.join(RUTA_DATA, "eventos_simples.json")
-    if not os.path.exists(ruta_eventos):
-        ruta_eventos = os.path.join(RUTA_DATA, "eventos_simples.json")
-        if not os.path.exists(ruta_eventos):
-            print(f"ERROR: No hay eventos simulados en {ruta_eventos}")
+    events_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+    if not os.path.exists(events_path):
+        events_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+        if not os.path.exists(events_path):
+            print(f"ERROR: No hay eventos simulados en {events_path}")
             print("  Ejecute primero: python speed_layer/kafka_producer.py simulado")
             return False
 
     try:
-        print(f"Leyendo eventos simulados desde: {ruta_eventos}")
-        with open(ruta_eventos, "r", encoding="utf-8") as f:
-            eventos_raw = json.load(f)
+        print(f"Leyendo eventos simulados desde: {events_path}")
+        df_events = spark.read.json(events_path)
+        print(f"  Eventos cargados: {df_events.count():,}")
 
-        print(f"  Eventos cargados: {len(eventos_raw):,}")
-
-        if not eventos_raw:
+        if df_events.count() == 0:
             print("ERROR: No hay eventos para procesar.")
             return False
-
-        # Convertir a DataFrame de Spark
-        from pyspark.sql import Row
-
-        rows = []
-        for evt in eventos_raw:
-            rows.append(Row(**evt))
-
-        df_eventos = spark.createDataFrame(rows)
-        print(f"  DataFrame creado: {df_eventos.count():,} filas")
 
         # Convertir tipos
         for col_name, tipo in [
@@ -628,8 +730,8 @@ def modo_streaming_simulado(spark, estadisticas):
             ("CONSUMO", DoubleType()),
             ("IMPORTE", DoubleType())
         ]:
-            if col_name in df_eventos.columns:
-                df_eventos = df_eventos.withColumn(
+            if col_name in df_events.columns:
+                df_events = df_events.withColumn(
                     col_name, col(col_name).cast(tipo)
                 )
 
@@ -637,8 +739,8 @@ def modo_streaming_simulado(spark, estadisticas):
             "FECHA_EMISION", "FECHA_VENCIMIENTO",
             "FECHA_COSNUMO_DESDE", "FECHA_CONSUMO_HASTA"
         ]:
-            if col_fecha in df_eventos.columns:
-                df_eventos = df_eventos.withColumn(
+            if col_fecha in df_events.columns:
+                df_events = df_events.withColumn(
                     col_fecha,
                     when(col(col_fecha).isNull(), lit(None))
                     .otherwise(col(col_fecha).cast(TimestampType()))
@@ -646,16 +748,18 @@ def modo_streaming_simulado(spark, estadisticas):
 
         # Enriquecer eventos
         print("\nEnriqueciendo eventos con estadisticas historicas...")
-        df_enriquecido = enriquecer_eventos(df_eventos, estadisticas)
-        if df_enriquecido is None:
+        enriched_df = enrich_events(df_events, statistics_df)
+        if enriched_df is None:
             return False
 
         # Clasificar anomalias
-        df_anomalias = clasificar_anomalias(df_enriquecido)
+        anomalies_df = classify_anomalies(enriched_df)
+
+        # Acumulacion regional por hora
+        calculate_region_hourly_accumulation(anomalies_df)
 
         # Anadir id_anomalia UUID
-        from pyspark.sql.functions import monotonically_increasing_id, concat, lit
-        df_anomalias = df_anomalias.withColumn(
+        anomalies_df = anomalies_df.withColumn(
             "id_anomalia",
             concat(
                 lit("ANOM-"),
@@ -673,48 +777,48 @@ def modo_streaming_simulado(spark, estadisticas):
             "tipo_anomalia", "nivel_riesgo", "fecha_deteccion", "flag_anomalia"
         ]
 
-        cols_existentes = [c for c in cols_final if c in df_anomalias.columns]
-        df_final = df_anomalias.select(cols_existentes)
+        cols_existentes = [c for c in cols_final if c in anomalies_df.columns]
+        final_df = anomalies_df.select(cols_existentes)
 
         # Guardar resultados
-        ruta_salida = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
-        df_final.coalesce(1).write.mode("overwrite").parquet(ruta_salida)
-        print(f"\nResultados guardados en: {ruta_salida}")
+        output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
+        final_df.coalesce(1).write.mode("overwrite").parquet(output_path)
+        print(f"\nResultados guardados en: {output_path}")
 
         # Tambien guardar CSV para serving layer
-        ruta_csv = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM.csv")
-        df_final.coalesce(1).write.mode("overwrite") \
+        csv_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM.csv")
+        final_df.coalesce(1).write.mode("overwrite") \
             .option("header", "true") \
             .option("sep", ",") \
             .option("encoding", "UTF-8") \
-            .csv(ruta_csv.replace(".csv", ""))
-        print(f"Resultados CSV guardados en: {ruta_csv}")
+            .csv(csv_path.replace(".csv", ""))
+        print(f"Resultados CSV guardados en: {csv_path}")
 
         # Copiar a serving layer
-        ruta_serving = os.path.join(RUTA_SERVING, "datos_streaming.parquet")
-        df_final.coalesce(1).write.mode("overwrite").parquet(ruta_serving)
-        print(f"Datos copiados a serving layer: {ruta_serving}")
+        serving_path = os.path.join(RUTA_SERVING, "datos_streaming.parquet")
+        final_df.coalesce(1).write.mode("overwrite").parquet(serving_path)
+        print(f"Datos copiados a serving layer: {serving_path}")
 
         # Estadisticas
-        total_anomalias = df_final.count()
+        total_anomalies = final_df.count()
         print(f"\n=== RESUMEN STREAMING ===")
-        print(f"  Total registros: {total_anomalias:,}")
+        print(f"  Total registros: {total_anomalies:,}")
 
         print("\n  Distribucion tipo_anomalia:")
-        df_final.groupBy("tipo_anomalia").agg(
+        final_df.groupBy("tipo_anomalia").agg(
             spark_count("*").alias("cantidad")
         ).orderBy(col("cantidad").desc()).show(truncate=False)
 
         print("\n  Distribucion nivel_riesgo:")
-        df_final.groupBy("nivel_riesgo").agg(
+        final_df.groupBy("nivel_riesgo").agg(
             spark_count("*").alias("cantidad")
         ).orderBy(col("cantidad").desc()).show(truncate=False)
 
         # Nulos en columnas criticas
-        nulos_zscore = df_final.filter(
+        nulos_zscore = final_df.filter(
             col("zscore_consumo").isNull()
         ).count()
-        nulos_flag = df_final.filter(
+        nulos_flag = final_df.filter(
             col("flag_anomalia").isNull()
         ).count()
         print(f"\n  Nulos en zscore_consumo: {nulos_zscore}")
@@ -729,63 +833,63 @@ def modo_streaming_simulado(spark, estadisticas):
         return False
 
 
-def validar_latencia(inicio, fin, precision_pct=None):
+def validate_latency(start_time, end_time, precision_pct=None):
     """
     Valida KPI OE3: latencia < 5 segundos y precision >= 90%.
 
     Parametros:
-        inicio (float): Tiempo de inicio (time.time()).
-        fin (float): Tiempo de fin (time.time()).
+        start_time (float): Tiempo de inicio (time.time()).
+        end_time (float): Tiempo de fin (time.time()).
         precision_pct (float): Precision calculada (opcional).
 
     Retorna:
         dict: Metricas de latency.
     """
     try:
-        latencia = fin - inicio
-        metricas = {
-            "latencia_segundos": round(latencia, 3),
-            "oe3_latencia_cumplido": latencia < 5,
+        latency = end_time - start_time
+        metrics = {
+            "latencia_segundos": round(latency, 3),
+            "oe3_latencia_cumplido": latency < 5,
             "precision_pct": precision_pct or 0,
             "oe3_precision_cumplido": (precision_pct or 0) >= 90,
-            "oe3_cumplido": (latencia < 5) and ((precision_pct or 0) >= 90 or precision_pct is None)
+            "oe3_cumplido": (latency < 5) and ((precision_pct or 0) >= 90 or precision_pct is None)
         }
         print(f"\n=== VALIDACION KPI OE3 ===")
-        print(f"  Latencia: {latencia:.3f} seg (requerido < 5)")
-        print(f"  OE3 latencia: {'SI' if metricas['oe3_latencia_cumplido'] else 'NO'}")
+        print(f"  Latencia: {latency:.3f} seg (requerido < 5)")
+        print(f"  OE3 latencia: {'SI' if metrics['oe3_latencia_cumplido'] else 'NO'}")
         if precision_pct is not None:
             print(f"  Precision: {precision_pct:.2f}% (requerido >= 90%)")
-            print(f"  OE3 precision: {'SI' if metricas['oe3_precision_cumplido'] else 'NO'}")
-        print(f"  OE3 cumplido: {'SI' if metricas['oe3_cumplido'] else 'NO'}")
-        return metricas
+            print(f"  OE3 precision: {'SI' if metrics['oe3_precision_cumplido'] else 'NO'}")
+        print(f"  OE3 cumplido: {'SI' if metrics['oe3_cumplido'] else 'NO'}")
+        return metrics
     except Exception as e:
         print(f"ERROR validando latencia: {e}")
         return {}
 
 
-def guardar_reporte(metricas):
+def save_report(metrics):
     """
     Guarda reporte JSON del streaming layer.
 
     Parametros:
-        metricas (dict): Metricas a guardar.
+        metrics (dict): Metricas a guardar.
     """
     try:
         os.makedirs(RUTA_SPEED, exist_ok=True)
-        ruta = os.path.join(RUTA_SPEED, "reporte_streaming.json")
-        with open(ruta, "w", encoding="utf-8") as f:
-            json.dump(metricas, f, indent=2, ensure_ascii=False)
-        print(f"  Reporte streaming guardado: {ruta}")
+        path = os.path.join(RUTA_SPEED, "reporte_streaming.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2, ensure_ascii=False)
+        print(f"  Reporte streaming guardado: {path}")
     except Exception as e:
         print(f"ERROR guardando reporte: {e}")
 
 
-def ejecutar(modo="auto"):
+def execute(mode="auto"):
     """
     Ejecuta la capa speed (streaming) del pipeline Lambda.
 
     Parametros:
-        modo (str): "real" para Kafka, "simulado" para archivo JSON,
+        mode (str): "real" para Kafka, "simulado" para archivo JSON,
                     "auto" para detectar.
 
     Retorna:
@@ -795,47 +899,47 @@ def ejecutar(modo="auto"):
     print("SPEED LAYER — Streaming de anomalias de consumo")
     print("=" * 60)
 
-    inicio_total = time.time()
+    start_time_total = time.time()
 
-    spark = crear_spark_session()
+    spark = create_spark_session()
     if spark is None:
         return False
 
     try:
         # Leer estadisticas historicas (generadas por batch layer)
-        estadisticas = leer_estadisticas_historicas(spark)
-        if estadisticas is None:
+        statistics_df = read_historical_statistics(spark)
+        if statistics_df is None:
             print("ERROR: No se encontraron estadisticas historicas.")
             print("  Ejecute primero: python batch_layer/spark_batch.py")
             return False
 
         # Cachear estadisticas para broadcasting
-        estadisticas.cache()
-        estadisticas.count()
+        statistics_df.cache()
+        statistics_df.count()
 
-        if modo == "real":
-            resultado = modo_streaming_kafka(spark, estadisticas)
-        elif modo == "simulado":
-            resultado = modo_streaming_simulado(spark, estadisticas)
+        if mode == "real":
+            result = kafka_streaming_mode(spark, statistics_df)
+        elif mode == "simulado":
+            result = simulated_streaming_mode(spark, statistics_df)
         else:
             # auto: intentar Kafka, fallback a simulado
-            ruta_sim = os.path.join(RUTA_DATA, "eventos_simples.json")
-            if os.path.exists(ruta_sim):
+            sim_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+            if os.path.exists(sim_path):
                 print("Usando modo simulado (eventos JSON encontrados)")
-                resultado = modo_streaming_simulado(spark, estadisticas)
+                result = simulated_streaming_mode(spark, statistics_df)
             else:
                 print("Intentando modo real (Kafka)...")
-                resultado = modo_streaming_kafka(spark, estadisticas)
+                result = kafka_streaming_mode(spark, statistics_df)
 
-        fin_total = time.time()
-        metricas_latencia = validar_latencia(inicio_total, fin_total)
-        guardar_reporte(metricas_latencia)
+        end_time_total = time.time()
+        latency_metrics = validate_latency(start_time_total, end_time_total)
+        save_report(latency_metrics)
 
         print("\n" + "=" * 60)
         print("SPEED LAYER COMPLETADO")
         print("=" * 60)
 
-        return resultado
+        return result
 
     except Exception as e:
         print(f"ERROR en speed layer: {e}")
@@ -849,5 +953,5 @@ def ejecutar(modo="auto"):
 
 
 if __name__ == "__main__":
-    modo = sys.argv[1] if len(sys.argv) > 1 else "auto"
-    ejecutar(modo)
+    mode = sys.argv[1] if len(sys.argv) > 1 else "auto"
+    execute(mode)

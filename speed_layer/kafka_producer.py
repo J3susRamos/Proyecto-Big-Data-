@@ -256,6 +256,11 @@ def real_kafka_mode(rows):
     print(f"  Duracion:   {elapsed_time:.2f} s")
     print(f"  Tasa:       {rate:,.0f} eventos/s")
 
+    # Guardar copia JSON para compatibilidad con serving layer
+    # (NRO_DOC_FAC no viaja en el schema de streaming)
+    print("\nGuardando copia local para serving layer...")
+    simulated_mode(rows)
+
 
 # =====================================================================
 # 4. MODO SIMULADO (SIN KAFKA)
