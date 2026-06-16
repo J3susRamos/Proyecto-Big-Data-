@@ -386,6 +386,64 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
   .kpi-grid { grid-template-columns: 1fr; }
   .dashboard-header { flex-direction: column; align-items: flex-start; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   REACTIVE ALERTAS — CAPA 5
+   ═══════════════════════════════════════════════════════════════════ */
+.alertas-status-bar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 8px 14px;
+  background: rgba(255,23,68,0.06);
+  border: 1px solid rgba(255,23,68,0.15);
+  border-radius: var(--radius-sm);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.alertas-status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.alertas-status-dot.online { background: var(--accent-green); box-shadow: 0 0 8px rgba(0,230,118,0.5); }
+.alertas-status-dot.offline { background: var(--text-muted); }
+.alertas-status-text { font-size: 12px; color: var(--text-secondary); }
+.alertas-status-text strong { color: var(--text-primary); }
+.alertas-badge-count {
+  margin-left: auto;
+  font-size: 13px; font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 20px;
+  background: rgba(255,23,68,0.15);
+  color: var(--accent-red);
+}
+.alert-toast {
+  position: fixed; top: 20px; right: 20px;
+  z-index: 9999;
+  display: flex; flex-direction: column; gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+.alert-toast-item {
+  background: var(--bg-card);
+  border: 1px solid rgba(255,23,68,0.3);
+  border-left: 4px solid var(--accent-red);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  animation: toastIn 0.3s ease-out;
+  pointer-events: auto;
+  cursor: pointer;
+  font-size: 12px;
+}
+.alert-toast-item:hover { border-color: var(--accent-red); }
+.alert-toast-item .toast-title {
+  font-weight: 600; color: var(--accent-red); margin-bottom: 4px;
+}
+.alert-toast-item .toast-detail { color: var(--text-secondary); font-size: 11px; }
+.alert-toast-item .toast-detail strong { color: var(--text-primary); }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
 </style>
 </head>
 <body>
@@ -557,6 +615,42 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
+     REACTIVE ALERTAS — CAPA 5 (API /alertas)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Alertas por Ventana Horaria — API <span class="chart-badge stream" style="font-size:9px;margin-left:6px;">REACTIVO</span></div>
+<div class="live-section animate-in" style="animation-delay:0.1s">
+  <div class="alertas-status-bar" id="alertasStatusBar">
+    <span class="alertas-status-dot offline" id="alertasStatusDot"></span>
+    <span class="alertas-status-text" id="alertasStatusText">Conectando con API de alertas...</span>
+    <span class="alertas-badge-count" id="alertasBadgeCount">0</span>
+  </div>
+  <div style="max-height:350px; overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th>Departamento</th>
+          <th>Distrito</th>
+          <th style="text-align:right">Consumo Hora (kWh)</th>
+          <th style="text-align:center">Eventos</th>
+          <th style="text-align:center">Nivel</th>
+          <th>Mensaje</th>
+        </tr>
+      </thead>
+      <tbody id="alertasApiBody"></tbody>
+    </table>
+  </div>
+  <div style="margin-top:8px; font-size:11px; color:var(--text-muted); display:flex; justify-content:space-between;">
+    <span id="alertasApiFooter">Esperando datos...</span>
+    <span id="alertasApiTimer">—</span>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     NOTIFICACIONES TOAST
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="alert-toast" id="alertToast"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
      ROW 3: RESÚMENES POR TARIFA, CARTERA, DEPARTAMENTO
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section-title">Resúmenes por Dimensión</div>
@@ -619,7 +713,9 @@ const PLOTLY_LAYOUT_BASE = {
 };
 const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
 const DATA_DIR = 'dashboard_data';
+const API_BASE = 'http://localhost:8060';
 let eventCount = 0;
+let prevAlertIds = new Set();
 
 /* ── Utilidades ────────────────────────────────────────────────── */
 function updateTimestamp() {
@@ -653,6 +749,94 @@ async function fetchJSON(url) {
     console.warn('Fetch error:', url, e);
     return null;
   }
+}
+
+/* ── API de Alertas (Capa 5) ──────────────────────────────────── */
+let lastAlertasFetch = 0;
+
+async function fetchAlertasAPI() {
+  try {
+    const res = await fetch(API_BASE + '/alertas?limit=200&_=' + Date.now(), { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    lastAlertasFetch = Date.now();
+    renderAlertasPanel(data);
+    updateAlertasStatus(true, data.total);
+    return data;
+  } catch (e) {
+    console.warn('API alertas no disponible:', e.message);
+    updateAlertasStatus(false);
+    return null;
+  }
+}
+
+function renderAlertasPanel(data) {
+  const tbody = document.getElementById('alertasApiBody');
+  const footer = document.getElementById('alertasApiFooter');
+  const timer = document.getElementById('alertasApiTimer');
+
+  if (!data || !data.data || data.data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="error-msg">Sin alertas activas</td></tr>';
+    footer.textContent = 'Esperando datos de ventana horaria...';
+    timer.textContent = '';
+    return;
+  }
+
+  const nuevos = data.data.filter(a => !prevAlertIds.has(a.window_start + a.DISTRITO));
+  nuevos.forEach(a => showAlertToast(a));
+
+  data.data.forEach(a => prevAlertIds.add(a.window_start + a.DISTRITO));
+
+  tbody.innerHTML = data.data.slice(0, 100).map(a => {
+    const nivel = (a.nivel || 'NORMAL').toUpperCase();
+    const rowClass = nivel === 'CRITICO' ? 'row-critico' : nivel === 'ALTO' ? 'row-alto' : '';
+    const badgeClass = nivel === 'CRITICO' ? 'badge-critico' : nivel === 'ALTO' ? 'badge-alto' : 'badge-normal';
+    const consumo = Number(a.consumo_total_hora || 0).toLocaleString('es-PE', { maximumFractionDigits: 2 });
+
+    return `<tr class="${rowClass}">
+      <td>${a.DEPARTAMENTO || '—'}</td>
+      <td><strong>${a.DISTRITO || '—'}</strong></td>
+      <td style="text-align:right;font-weight:600">${consumo}</td>
+      <td style="text-align:center">${fmtInt(a.total_eventos)}</td>
+      <td style="text-align:center"><span class="badge ${badgeClass}">${nivel}</span></td>
+      <td style="font-size:11px;color:var(--text-secondary)">${a.mensaje || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  footer.textContent = `${data.total} alertas en ventana horaria · mostrando ${Math.min(data.data.length, 100)}`;
+  timer.textContent = `última actualización: ${new Date().toLocaleTimeString('es-PE')}`;
+}
+
+function updateAlertasStatus(online, count) {
+  const dot = document.getElementById('alertasStatusDot');
+  const text = document.getElementById('alertasStatusText');
+  const badge = document.getElementById('alertasBadgeCount');
+
+  if (online) {
+    dot.className = 'alertas-status-dot online';
+    text.innerHTML = `<strong>API conectada</strong> · topic <strong>hidrandina-alertas</strong>`;
+    badge.textContent = count || 0;
+  } else {
+    dot.className = 'alertas-status-dot offline';
+    text.textContent = 'API no disponible — MODO=dashboard o Kafka desconectado';
+    badge.textContent = '—';
+  }
+}
+
+function showAlertToast(alerta) {
+  const container = document.getElementById('alertToast');
+  const el = document.createElement('div');
+  el.className = 'alert-toast-item';
+  el.innerHTML = `
+    <div class="toast-title">🚨 ${alerta.nivel || 'ALERTA'} · ${alerta.DISTRITO || ''}</div>
+    <div class="toast-detail">
+      <strong>${Number(alerta.consumo_total_hora || 0).toLocaleString('es-PE', { maximumFractionDigits: 2 })} kWh</strong>
+      en ${fmtInt(alerta.total_eventos)} eventos · ${alerta.DEPARTAMENTO || ''}
+    </div>
+  `;
+  el.onclick = () => el.remove();
+  container.appendChild(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 8000);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1087,11 +1271,13 @@ async function loadDashboard() {
 async function refreshLive() {
   const sim = await fetchJSON(DATA_DIR + '/simulated_stream.json');
   if (sim && !sim.error) renderLiveTable(sim);
+  fetchAlertasAPI();
 }
 
 // Iniciar
 loadDashboard();
 updateTimestamp();
+fetchAlertasAPI();
 setInterval(refreshLive, 5000);
 setInterval(updateTimestamp, 1000);
 </script>
