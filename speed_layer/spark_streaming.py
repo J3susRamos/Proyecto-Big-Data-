@@ -31,7 +31,7 @@ from pyspark.sql.functions import (
     to_json, udf, count as spark_count, avg as spark_avg,
     stddev as spark_stddev, round as spark_round, abs as spark_abs,
     coalesce, isnan, isnull, monotonically_increasing_id, concat,
-    hour, sum as spark_sum
+    hour, sum as spark_sum, window
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, DoubleType, IntegerType,
@@ -653,6 +653,103 @@ def process_stream_batch(enriched_df, epoch_id):
         print(f"ERROR en micro-batch {epoch_id}: {e}")
 
 
+# =====================================================================
+# CAPA 3 — VENTANA DE AGREGACION POR HORA/REGION
+# =====================================================================
+
+def create_region_hourly_alerts(enriched_df):
+    """
+    Agrupa eventos por DISTRITO + ventana de 1 hora y genera alertas
+    cuando el consumo agregado supera 500 kWh.
+
+    Parametros:
+        enriched_df (DataFrame): Stream de eventos enriquecidos.
+
+    Retorna:
+        DataFrame: Stream de alertas con columnas:
+            window_start, window_end, DEPARTAMENTO, DISTRITO,
+            consumo_total_hora, total_eventos, consumo_promedio,
+            fecha_generacion, nivel, mensaje
+    """
+    try:
+        alertas_df = (
+            enriched_df
+            .withWatermark("FECHA_EMISION", "1 hour")
+            .groupBy(
+                window(col("FECHA_EMISION"), "1 hour"),
+                col("DEPARTAMENTO"),
+                col("DISTRITO")
+            )
+            .agg(
+                spark_sum("CONSUMO").alias("consumo_total_hora"),
+                spark_count("*").alias("total_eventos"),
+                spark_round(spark_avg("CONSUMO"), 2).alias("consumo_promedio"),
+            )
+            .filter(col("consumo_total_hora") > 500)
+            .select(
+                col("window.start").alias("window_start"),
+                col("window.end").alias("window_end"),
+                col("DEPARTAMENTO"),
+                col("DISTRITO"),
+                spark_round(col("consumo_total_hora"), 2).alias("consumo_total_hora"),
+                col("total_eventos"),
+                col("consumo_promedio"),
+                current_timestamp().alias("fecha_generacion"),
+                lit("CRITICO").alias("nivel"),
+                concat(
+                    lit("Alerta: consumo de "),
+                    col("DISTRITO"),
+                    lit(" ("), col("DEPARTAMENTO"),
+                    lit(") supera 500 kWh/hora: "),
+                    spark_round(col("consumo_total_hora"), 2),
+                    lit(" kWh")
+                ).alias("mensaje")
+            )
+        )
+
+        return alertas_df
+    except Exception as e:
+        print(f"ERROR en create_region_hourly_alerts: {e}")
+        raise
+
+
+def write_alerts_to_kafka(alertas_df):
+    """
+    Escribe el stream de alertas al topic 'hidrandina-alertas'.
+
+    Parametros:
+        alertas_df (DataFrame): Stream de alertas generado.
+
+    Retorna:
+        StreamingQuery: Consulta de streaming.
+    """
+    try:
+        checkpoint_path = KAFKA_CHECKPOINT + "_alertas"
+        os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+
+        query = (
+            alertas_df
+            .select(
+                col("DISTRITO").cast("string").alias("key"),
+                to_json(struct("*")).alias("value")
+            )
+            .writeStream
+            .format("kafka")
+            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
+            .option("topic", "hidrandina-alertas")
+            .option("checkpointLocation", checkpoint_path)
+            .trigger(processingTime="10 seconds")
+            .outputMode("append")
+            .start()
+        )
+
+        print(f"Alertas streaming hacia topic 'hidrandina-alertas' iniciado.")
+        return query
+    except Exception as e:
+        print(f"ERROR en write_alerts_to_kafka: {e}")
+        return None
+
+
 def kafka_streaming_mode(spark, statistics_df):
     """
     Ejecuta el pipeline en modo streaming real con Kafka.
@@ -669,23 +766,32 @@ def kafka_streaming_mode(spark, statistics_df):
     df_events = parse_event(df_kafka, schema)
     enriched_df = enrich_events(df_events, statistics_df)
 
-    query = save_streaming_output(enriched_df)
-    if query is None:
-        print("ERROR: No se pudo iniciar la consulta de streaming.")
+    # Query 1: Anomalias individuales (existente)
+    query_anomalias = save_streaming_output(enriched_df)
+    if query_anomalias is None:
+        print("ERROR: No se pudo iniciar la consulta de anomalias.")
         return False
 
-    print("\nStreaming iniciado. Procesando datos de Kafka...")
+    # Query 2: Alertas por ventana horaria (Capa 3)
+    print("\nIniciando agregacion por ventana horaria...")
+    alertas_df = create_region_hourly_alerts(enriched_df)
+    query_alertas = write_alerts_to_kafka(alertas_df)
+    if query_alertas is None:
+        print("  ADVERTENCIA: No se pudo iniciar alertas.")
+
+        print("\nStreaming iniciado. Procesando datos de Kafka...")
     print("  Timeout: 300s (5 minutos)")
     print("  Presione Ctrl+C para detener antes.")
 
     try:
-        query.awaitTermination(timeout=300)
+        # Esperar a que termine la query principal (anomalias)
+        query_anomalias.awaitTermination(timeout=300)
     except KeyboardInterrupt:
         print("\nStreaming detenido por el usuario.")
-        query.stop()
-    except Exception as e:
-        print(f"Error en streaming: {e}")
-        query.stop()
+    finally:
+        query_anomalias.stop()
+        if query_alertas is not None:
+            query_alertas.stop()
 
     return True
 
