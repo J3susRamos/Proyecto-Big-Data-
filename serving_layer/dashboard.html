@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hidrandina S.A. — Detección de Anomalías en Consumo Eléctrico</title>
+<meta name="description" content="Dashboard de detección de anomalías en consumo eléctrico — Arquitectura Lambda — Hidrandina S.A.">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   RESET & BASE
+   ═══════════════════════════════════════════════════════════════════ */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg-primary: #06090f;
+  --bg-card: #0c1018;
+  --bg-card-hover: #111824;
+  --border: rgba(99,130,180,0.12);
+  --border-hover: rgba(99,130,180,0.25);
+  --text-primary: #e8edf5;
+  --text-secondary: #7a869a;
+  --text-muted: #4e5a6e;
+  --accent-green: #00e676;
+  --accent-green-dim: rgba(0,230,118,0.12);
+  --accent-orange: #ff9100;
+  --accent-orange-dim: rgba(255,145,0,0.12);
+  --accent-blue: #448aff;
+  --accent-blue-dim: rgba(68,138,255,0.12);
+  --accent-red: #ff1744;
+  --accent-red-dim: rgba(255,23,68,0.12);
+  --accent-purple: #b388ff;
+  --accent-purple-dim: rgba(179,136,255,0.12);
+  --accent-cyan: #00e5ff;
+  --accent-cyan-dim: rgba(0,229,255,0.12);
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 4px 24px rgba(0,0,0,0.35);
+  --transition: 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  padding: 20px 28px 40px;
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════════════ */
+.dashboard-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.header-brand {
+  display: flex; align-items: center; gap: 16px;
+}
+.header-logo {
+  width: 48px; height: 48px;
+  background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800; color: #fff;
+  box-shadow: 0 4px 20px rgba(0,230,118,0.25);
+}
+.header-title h1 {
+  font-size: 22px; font-weight: 700;
+  background: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.header-subtitle {
+  font-size: 13px; color: var(--text-secondary); font-weight: 400;
+  margin-top: 2px;
+}
+.header-meta {
+  display: flex; align-items: center; gap: 24px;
+}
+.live-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: rgba(255,23,68,0.1);
+  border: 1px solid rgba(255,23,68,0.3);
+  padding: 6px 14px; border-radius: 20px;
+  font-size: 12px; font-weight: 600; color: var(--accent-red);
+  letter-spacing: 0.5px;
+}
+.live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-red);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255,23,68,0.4); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 6px rgba(255,23,68,0); }
+}
+.header-timestamp {
+  font-size: 12px; color: var(--text-muted); font-weight: 400;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SECTION TITLES
+   ═══════════════════════════════════════════════════════════════════ */
+.section-title {
+  font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 1.2px;
+  margin-bottom: 14px; padding-left: 2px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title::before {
+  content: ''; display: inline-block;
+  width: 3px; height: 16px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent-green), var(--accent-blue));
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   KPI CARDS — 6 INDICATORS
+   ═══════════════════════════════════════════════════════════════════ */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  margin-bottom: 28px;
+}
+.kpi-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 18px 16px;
+  position: relative; overflow: hidden;
+  transition: var(--transition);
+  cursor: default;
+}
+.kpi-card:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.kpi-accent {
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+.kpi-accent.green { background: linear-gradient(90deg, var(--accent-green), #69f0ae); }
+.kpi-accent.orange { background: linear-gradient(90deg, var(--accent-orange), #ffab40); }
+.kpi-accent.blue { background: linear-gradient(90deg, var(--accent-blue), #82b1ff); }
+.kpi-accent.red { background: linear-gradient(90deg, var(--accent-red), #ff5252); }
+.kpi-accent.purple { background: linear-gradient(90deg, var(--accent-purple), #ea80fc); }
+.kpi-accent.cyan { background: linear-gradient(90deg, var(--accent-cyan), #84ffff); }
+
+.kpi-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; margin-bottom: 12px;
+}
+.kpi-icon.green { background: var(--accent-green-dim); }
+.kpi-icon.orange { background: var(--accent-orange-dim); }
+.kpi-icon.blue { background: var(--accent-blue-dim); }
+.kpi-icon.red { background: var(--accent-red-dim); }
+.kpi-icon.purple { background: var(--accent-purple-dim); }
+.kpi-icon.cyan { background: var(--accent-cyan-dim); }
+
+.kpi-label {
+  font-size: 10.5px; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  font-weight: 500; margin-bottom: 6px;
+}
+.kpi-value {
+  font-size: 24px; font-weight: 800; line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value.green { color: var(--accent-green); }
+.kpi-value.orange { color: var(--accent-orange); }
+.kpi-value.blue { color: var(--accent-blue); }
+.kpi-value.red { color: var(--accent-red); }
+.kpi-value.purple { color: var(--accent-purple); }
+.kpi-value.cyan { color: var(--accent-cyan); }
+
+.kpi-sub {
+  font-size: 11px; color: var(--text-muted);
+  margin-top: 6px; line-height: 1.4;
+}
+.kpi-sub strong { color: var(--text-secondary); font-weight: 600; }
+
+.kpi-glow {
+  position: absolute; bottom: -20px; right: -20px;
+  width: 80px; height: 80px; border-radius: 50%;
+  filter: blur(30px); opacity: 0.08;
+  pointer-events: none;
+}
+.kpi-glow.green { background: var(--accent-green); }
+.kpi-glow.orange { background: var(--accent-orange); }
+.kpi-glow.blue { background: var(--accent-blue); }
+.kpi-glow.red { background: var(--accent-red); }
+.kpi-glow.purple { background: var(--accent-purple); }
+.kpi-glow.cyan { background: var(--accent-cyan); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   CHART CARDS
+   ═══════════════════════════════════════════════════════════════════ */
+.chart-grid {
+  display: grid; gap: 16px; margin-bottom: 24px;
+}
+.chart-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+.chart-grid.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+.chart-grid.cols-2-1 { grid-template-columns: 1.3fr 0.7fr; }
+
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: var(--transition);
+}
+.chart-card:hover {
+  border-color: var(--border-hover);
+}
+.chart-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+}
+.chart-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+}
+.chart-badge {
+  font-size: 10px; font-weight: 500;
+  padding: 3px 10px; border-radius: 12px;
+  letter-spacing: 0.3px;
+}
+.chart-badge.batch {
+  background: var(--accent-blue-dim); color: var(--accent-blue);
+}
+.chart-badge.stream {
+  background: var(--accent-red-dim); color: var(--accent-red);
+}
+.chart-badge.serving {
+  background: var(--accent-green-dim); color: var(--accent-green);
+}
+.chart-container { width: 100%; height: 380px; }
+.chart-container.tall { height: 440px; }
+.chart-container.short { height: 320px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LIVE TABLE
+   ═══════════════════════════════════════════════════════════════════ */
+.live-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+}
+.live-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+}
+.live-title {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 15px; font-weight: 600;
+}
+.live-counter {
+  font-size: 12px; color: var(--text-muted);
+  background: rgba(255,255,255,0.04); padding: 4px 12px;
+  border-radius: 20px;
+}
+
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+thead th {
+  text-align: left; padding: 10px 12px;
+  color: var(--text-muted); font-weight: 600; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: sticky; top: 0;
+  background: var(--bg-card);
+}
+tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(99,130,180,0.06);
+  transition: background 0.15s;
+}
+tbody tr:hover td { background: rgba(68,138,255,0.04); }
+.row-critico td { background: rgba(255,23,68,0.06); }
+.row-critico:hover td { background: rgba(255,23,68,0.1); }
+.row-alto td { background: rgba(255,145,0,0.04); }
+.row-alto:hover td { background: rgba(255,145,0,0.08); }
+
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.badge-critico { background: rgba(255,23,68,0.15); color: var(--accent-red); }
+.badge-alto { background: rgba(255,145,0,0.15); color: var(--accent-orange); }
+.badge-normal { background: rgba(0,230,118,0.1); color: var(--accent-green); }
+
+.zscore-bar {
+  display: inline-block; height: 4px; border-radius: 2px;
+  min-width: 20px; max-width: 100px;
+  vertical-align: middle; margin-left: 8px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SUMMARY TABLES
+   ═══════════════════════════════════════════════════════════════════ */
+.summary-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: var(--transition);
+  height: 100%;
+}
+.summary-card:hover { border-color: var(--border-hover); }
+.summary-title {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  display: flex; align-items: center; gap: 6px;
+}
+.summary-card table { font-size: 11.5px; }
+.summary-card th { font-size: 10px; padding: 7px 8px; }
+.summary-card td { padding: 6px 8px; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   FOOTER
+   ═══════════════════════════════════════════════════════════════════ */
+.dashboard-footer {
+  text-align: center; padding: 24px 0 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+}
+.footer-text {
+  font-size: 11px; color: var(--text-muted);
+}
+.footer-text a {
+  color: var(--accent-blue); text-decoration: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ERROR / LOADING STATES
+   ═══════════════════════════════════════════════════════════════════ */
+.error-msg {
+  color: var(--accent-orange); font-size: 12px;
+  padding: 30px; text-align: center;
+}
+.loading-shimmer {
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.03) 50%, transparent 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fadeInUp 0.5s ease-out both;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 1400px) {
+  .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 1000px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .chart-grid.cols-2, .chart-grid.cols-2-1 { grid-template-columns: 1fr; }
+  .chart-grid.cols-3 { grid-template-columns: 1fr; }
+  body { padding: 14px; }
+}
+@media (max-width: 600px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .dashboard-header { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════════════════════════════════ -->
+<header class="dashboard-header animate-in" id="dashboardHeader">
+  <div class="header-brand">
+    <div class="header-logo">⚡</div>
+    <div class="header-title">
+      <h1>Hidrandina S.A. — Detección de Anomalías en Consumo Eléctrico</h1>
+      <div class="header-subtitle">
+        Arquitectura Lambda · La Libertad · Ancash · Cajamarca ·
+        <strong id="headerRecords">27.3M</strong> registros procesados
+      </div>
+    </div>
+  </div>
+  <div class="header-meta">
+    <div class="live-badge"><span class="live-dot"></span> LIVE</div>
+    <span class="header-timestamp" id="timestamp">—</span>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     KPI CARDS — 6 INDICADORES PRINCIPALES
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Indicadores Clave</div>
+<div class="kpi-grid">
+  <!-- 1. Registros Procesados -->
+  <div class="kpi-card animate-in" style="animation-delay:0.05s">
+    <div class="kpi-accent green"></div>
+    <div class="kpi-icon green">📊</div>
+    <div class="kpi-label">Registros Procesados</div>
+    <div class="kpi-value green" id="kpiRecords">—</div>
+    <div class="kpi-sub" id="kpiValidez">—</div>
+    <div class="kpi-glow green"></div>
+  </div>
+
+  <!-- 2. Anomalías Reales -->
+  <div class="kpi-card animate-in" style="animation-delay:0.1s">
+    <div class="kpi-accent orange"></div>
+    <div class="kpi-icon orange">🔍</div>
+    <div class="kpi-label">Anomalías Reales</div>
+    <div class="kpi-value orange" id="kpiAnomalias">—</div>
+    <div class="kpi-sub" id="kpiTasaAnomalia">—</div>
+    <div class="kpi-glow orange"></div>
+  </div>
+
+  <!-- 3. Consumo Total kWh -->
+  <div class="kpi-card animate-in" style="animation-delay:0.15s">
+    <div class="kpi-accent blue"></div>
+    <div class="kpi-icon blue">⚡</div>
+    <div class="kpi-label">Consumo Total kWh</div>
+    <div class="kpi-value blue" id="kpiConsumo">—</div>
+    <div class="kpi-sub" id="kpiPeriodo">—</div>
+    <div class="kpi-glow blue"></div>
+  </div>
+
+  <!-- 4. Alertas Críticas -->
+  <div class="kpi-card animate-in" style="animation-delay:0.2s">
+    <div class="kpi-accent red"></div>
+    <div class="kpi-icon red">🚨</div>
+    <div class="kpi-label">Alertas Críticas</div>
+    <div class="kpi-value red" id="kpiAlertas">—</div>
+    <div class="kpi-sub">z-score &gt; 3.0 · umbral real</div>
+    <div class="kpi-glow red"></div>
+  </div>
+
+  <!-- 5. Distritos Afectados -->
+  <div class="kpi-card animate-in" style="animation-delay:0.25s">
+    <div class="kpi-accent purple"></div>
+    <div class="kpi-icon purple">🗺️</div>
+    <div class="kpi-label">Distritos Afectados</div>
+    <div class="kpi-value purple" id="kpiDistritos">—</div>
+    <div class="kpi-sub" id="kpiDistritosSub">Con anomalías z &gt; 3</div>
+    <div class="kpi-glow purple"></div>
+  </div>
+
+  <!-- 6. Facturación Total -->
+  <div class="kpi-card animate-in" style="animation-delay:0.3s">
+    <div class="kpi-accent cyan"></div>
+    <div class="kpi-icon cyan">💰</div>
+    <div class="kpi-label">Facturación Total</div>
+    <div class="kpi-value cyan" id="kpiFacturacion">—</div>
+    <div class="kpi-sub" id="kpiFacturacionSub">Importe acumulado (S/)</div>
+    <div class="kpi-glow cyan"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     ROW 1: MAPA DE CALOR + DISTRIBUCIÓN DE RIESGO
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Análisis Geográfico & Distribución de Riesgo</div>
+<div class="chart-grid cols-2-1">
+  <div class="chart-card animate-in" style="animation-delay:0.1s" id="heatmapCard">
+    <div class="chart-header">
+      <span class="chart-title">🗺️ Mapa de Calor por Distrito — Tasa de Anomalías (UBIGEO)</span>
+      <span class="chart-badge serving">SERVING</span>
+    </div>
+    <div class="chart-container tall" id="heatmapPlot"></div>
+  </div>
+  <div class="chart-card animate-in" style="animation-delay:0.15s" id="riskCard">
+    <div class="chart-header">
+      <span class="chart-title">📊 Distribución de Riesgo (Corregida)</span>
+      <span class="chart-badge stream">STREAM</span>
+    </div>
+    <div class="chart-container tall" id="riskPlot"></div>
+    <div style="margin-top:8px; padding:10px 14px; background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.15); border-radius:8px;">
+      <div style="font-size:10.5px; color:var(--accent-green); font-weight:600;">✅ CORRECCIÓN APLICADA</div>
+      <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">
+        Solo registros con z-score &gt; 3 son anomalías reales.<br>
+        El resto es consumo normal dentro de la desviación estándar.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     ROW 2: TENDENCIA MENSUAL + TOP DISTRITOS
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Tendencia Histórica & Rankings</div>
+<div class="chart-grid cols-2">
+  <div class="chart-card animate-in" style="animation-delay:0.1s" id="trendCard">
+    <div class="chart-header">
+      <span class="chart-title">📈 Tendencia Mensual — Consumo Batch (27M registros)</span>
+      <span class="chart-badge batch">BATCH LAYER</span>
+    </div>
+    <div class="chart-container" id="trendPlot"></div>
+  </div>
+  <div class="chart-card animate-in" style="animation-delay:0.15s" id="rateCard">
+    <div class="chart-header">
+      <span class="chart-title">🏆 Top Distritos — Tasa de Anomalía (% anomalías / registros)</span>
+      <span class="chart-badge serving">SERVING</span>
+    </div>
+    <div class="chart-container" id="ratePlot"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     LIVE TABLE — ANOMALÍAS ACTIVAS
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Anomalías en Tiempo Real</div>
+<div class="live-section animate-in" style="animation-delay:0.1s">
+  <div class="live-header">
+    <div class="live-title">
+      <span class="live-dot"></span>
+      Anomalías Activas — Solo z &gt; 3.0
+    </div>
+    <div class="live-counter" id="eventCounter">Eventos procesados: 0</div>
+  </div>
+  <div style="max-height:450px; overflow-y:auto;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:60px">#</th>
+          <th>NRO_DOC_FAC</th>
+          <th>DISTRITO</th>
+          <th>CONSUMO (kWh)</th>
+          <th>IMPORTE (S/)</th>
+          <th>Z-SCORE</th>
+          <th>TIPO ANOMALÍA</th>
+          <th>RIESGO</th>
+        </tr>
+      </thead>
+      <tbody id="liveTableBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     ROW 3: RESÚMENES POR TARIFA, CARTERA, DEPARTAMENTO
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Resúmenes por Dimensión</div>
+<div class="chart-grid cols-3">
+  <div class="summary-card animate-in" style="animation-delay:0.05s">
+    <div class="summary-title">📋 Por Tarifa</div>
+    <div style="max-height:300px; overflow-y:auto;">
+      <table>
+        <thead>
+          <tr><th>Tarifa</th><th>Anomalías</th><th>Prom. Z</th><th>Máx Z</th><th>% Riesgo Alto</th></tr>
+        </thead>
+        <tbody id="tariffTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="summary-card animate-in" style="animation-delay:0.1s">
+    <div class="summary-title">📦 Por Cartera</div>
+    <div style="max-height:300px; overflow-y:auto;">
+      <table>
+        <thead>
+          <tr><th>Cartera</th><th>Anomalías</th><th>Prom. Z</th><th>Máx Z</th><th>% Riesgo Alto</th></tr>
+        </thead>
+        <tbody id="portfolioTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="summary-card animate-in" style="animation-delay:0.15s">
+    <div class="summary-title">🏛️ Por Departamento</div>
+    <div style="max-height:300px; overflow-y:auto;">
+      <table>
+        <thead>
+          <tr><th>Departamento</th><th>Distritos</th><th>Anomalías</th><th>Tasa %</th></tr>
+        </thead>
+        <tbody id="deptTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     FOOTER
+     ═══════════════════════════════════════════════════════════════════ -->
+<footer class="dashboard-footer">
+  <div class="footer-text">
+    Hidrandina S.A. — Arquitectura Lambda · Batch (PySpark) + Speed (Kafka + Streaming) + Serving (Pandas + Plotly) ·
+    Pipeline de detección de anomalías en consumo eléctrico
+  </div>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════════════════
+     JAVASCRIPT — DATA LOADING & RENDERING
+     ═══════════════════════════════════════════════════════════════════ -->
+<script>
+/* ── Configuración Plotly ──────────────────────────────────────── */
+const PLOTLY_LAYOUT_BASE = {
+  paper_bgcolor: 'rgba(0,0,0,0)',
+  plot_bgcolor: 'rgba(12,16,24,0.6)',
+  font: { family: 'Inter, sans-serif', color: '#e8edf5', size: 11 },
+  margin: { l: 50, r: 30, t: 10, b: 50 },
+};
+const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
+const DATA_DIR = 'dashboard_data';
+let eventCount = 0;
+
+/* ── Utilidades ────────────────────────────────────────────────── */
+function updateTimestamp() {
+  document.getElementById('timestamp').textContent =
+    new Date().toLocaleString('es-PE', { dateStyle: 'medium', timeStyle: 'medium' });
+}
+
+function fmt(n) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toLocaleString('es-PE', { maximumFractionDigits: 2 });
+}
+function fmtInt(n) {
+  if (n == null || isNaN(n)) return '—';
+  return Math.round(Number(n)).toLocaleString('es-PE');
+}
+function fmtCompact(n) {
+  if (n == null || isNaN(n)) return '—';
+  const num = Number(n);
+  if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
+  if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M';
+  if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K';
+  return fmt(num);
+}
+
+async function fetchJSON(url) {
+  try {
+    const res = await fetch(url + '?_=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch (e) {
+    console.warn('Fetch error:', url, e);
+    return null;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   KPIs — 6 TARJETAS
+   ══════════════════════════════════════════════════════════════════ */
+function renderKPIs(kpis, heatmapData) {
+  if (!kpis) return;
+
+  // 1. Registros Procesados
+  const totalReg = kpis.registros_procesados || 0;
+  document.getElementById('kpiRecords').textContent = fmtCompact(totalReg);
+  document.getElementById('kpiValidez').innerHTML =
+    '<strong>' + (kpis.loader_validez_pct || 0).toFixed(2) + '%</strong> validez del loader (OE1)';
+  document.getElementById('headerRecords').textContent =
+    totalReg >= 1e6 ? (totalReg / 1e6).toFixed(1) + 'M' : fmtInt(totalReg);
+
+  // 2. Anomalías Reales
+  const reales = kpis.anomalias_reales || 0;
+  document.getElementById('kpiAnomalias').textContent = fmtInt(reales);
+  const pct = kpis.tasa_anomalia_pct != null
+    ? Number(kpis.tasa_anomalia_pct).toFixed(2)
+    : '0.00';
+  document.getElementById('kpiTasaAnomalia').innerHTML =
+    '<strong>' + pct + '%</strong> del total — tasa corregida (z&gt;3)';
+
+  // 3. Consumo Total kWh
+  const consumo = kpis.consumo_total_kwh || 0;
+  document.getElementById('kpiConsumo').textContent = fmtCompact(consumo) + ' kWh';
+  document.getElementById('kpiPeriodo').textContent =
+    kpis.periodo_label || 'Dic 2022 — Jun 2025';
+
+  // 4. Alertas Críticas
+  document.getElementById('kpiAlertas').textContent = fmtInt(kpis.alertas_criticas || reales);
+
+  // 5. Distritos Afectados (del heatmap)
+  if (heatmapData && heatmapData.length > 0) {
+    const distritosConAnomalias = heatmapData.filter(d => (d.anomalias_reales || 0) > 0).length;
+    document.getElementById('kpiDistritos').textContent = fmtInt(distritosConAnomalias);
+    document.getElementById('kpiDistritosSub').textContent =
+      'de ' + heatmapData.length + ' distritos totales';
+  }
+
+  // 6. Facturación Total
+  if (kpis.facturacion_total_soles) {
+    document.getElementById('kpiFacturacion').textContent =
+      'S/ ' + fmtCompact(kpis.facturacion_total_soles);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MAPA DE CALOR POR DISTRITO (UBIGEO)
+   ══════════════════════════════════════════════════════════════════ */
+function renderHeatmap(data) {
+  const container = document.getElementById('heatmapPlot');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="error-msg">⚠️ Datos de heatmap no disponibles</div>';
+    return;
+  }
+
+  const lats = data.map(r => r.lat);
+  const lons = data.map(r => r.lon);
+  const sizes = data.map(r => Math.max(7, Math.log2((r.total_registros || 1)) * 3.5));
+  const colors = data.map(r => r.tasa_anomalia_pct ?? 0);
+  const hover = data.map(r =>
+    '<b>' + (r.distrito || '—') + '</b><br>' +
+    'Depto: ' + (r.departamento || '—') + '<br>' +
+    'UBIGEO: <b>' + (r.ubigeo || '—') + '</b><br>' +
+    'Registros: ' + fmtInt(r.total_registros) + '<br>' +
+    'Anomalías reales (z>3): <b>' + fmtInt(r.anomalias_reales) + '</b><br>' +
+    'Tasa: <b>' + (r.tasa_anomalia_pct ?? 0).toFixed(4) + '%</b><br>' +
+    'Riesgo: ' + (r.riesgo || '—')
+  );
+
+  const trace = {
+    type: 'scattergeo',
+    lon: lons, lat: lats,
+    mode: 'markers',
+    marker: {
+      size: sizes,
+      color: colors,
+      colorscale: [
+        [0, '#0c1018'],
+        [0.15, '#1a4020'],
+        [0.3, '#4a6a10'],
+        [0.5, '#8a6a00'],
+        [0.7, '#c04000'],
+        [1, '#ff1744'],
+      ],
+      showscale: true,
+      colorbar: {
+        title: { text: '% Anomalías', font: { color: '#7a869a', size: 10 } },
+        tickfont: { color: '#7a869a', size: 9 },
+        thickness: 12, len: 0.5,
+        bgcolor: 'rgba(0,0,0,0)',
+        outlinewidth: 0,
+      },
+      cmin: 0,
+      cmax: Math.max(...colors.filter(c => c > 0), 0.01) * 1.2,
+      line: { color: 'rgba(255,255,255,0.15)', width: 1 },
+      sizemode: 'area', sizeref: 2,
+    },
+    text: hover,
+    hovertemplate: '%{text}<extra></extra>',
+  };
+
+  Plotly.newPlot('heatmapPlot', [trace], {
+    ...PLOTLY_LAYOUT_BASE,
+    margin: { l: 0, r: 0, t: 0, b: 0 },
+    geo: {
+      scope: 'south america',
+      showland: true,
+      landcolor: '#111824',
+      coastlinecolor: '#2a3548',
+      showcountries: true,
+      countrycolor: '#2a3548',
+      showsubunits: true,
+      subunitcolor: '#2a3548',
+      lonaxis: { range: [-82, -76] },
+      lataxis: { range: [-12, -4] },
+      bgcolor: 'rgba(0,0,0,0)',
+      projection: { type: 'mercator' },
+    },
+  }, PLOTLY_CONFIG);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DISTRIBUCIÓN DE RIESGO (CORREGIDA)
+   ══════════════════════════════════════════════════════════════════ */
+function renderRisk(data) {
+  const container = document.getElementById('riskPlot');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="error-msg">⚠️ Datos de riesgo no disponibles</div>';
+    return;
+  }
+
+  const labels = data.map(r => r.nivel_riesgo || '');
+  const values = data.map(r => r.cantidad || 0);
+  const pcts = data.map(r => (r.pct || 0).toFixed(2) + '%');
+  const colors = labels.map(l =>
+    l.toLowerCase().includes('normal') ? '#00e676' : '#ff1744'
+  );
+
+  const trace = {
+    values, labels, type: 'pie',
+    marker: {
+      colors,
+      line: { color: '#0c1018', width: 2 },
+    },
+    textinfo: 'label+percent',
+    textfont: { size: 11, family: 'Inter' },
+    hovertemplate: '<b>%{label}</b><br>%{value:,.0f} registros<br>%{percent}<extra></extra>',
+    hole: 0.55, sort: false,
+    pull: labels.map(l => l.toLowerCase().includes('normal') ? 0 : 0.04),
+    rotation: 90,
+  };
+
+  Plotly.newPlot('riskPlot', [trace], {
+    ...PLOTLY_LAYOUT_BASE,
+    margin: { l: 10, r: 10, t: 10, b: 10 },
+    showlegend: true,
+    legend: {
+      orientation: 'h', y: -0.05,
+      font: { size: 10, color: '#7a869a' },
+    },
+    annotations: [{
+      text: '<b>' + fmtInt(values.reduce((a, b) => a + b, 0)) + '</b><br>total',
+      showarrow: false,
+      font: { size: 13, color: '#7a869a', family: 'Inter' },
+    }],
+  }, PLOTLY_CONFIG);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TENDENCIA MENSUAL — BATCH (27M registros, 31 periodos)
+   ══════════════════════════════════════════════════════════════════ */
+function renderBatchTrend(data) {
+  const container = document.getElementById('trendPlot');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="error-msg">⚠️ Datos de tendencia batch no disponibles</div>';
+    return;
+  }
+
+  const sorted = [...data].sort((a, b) => a.periodo - b.periodo);
+  const x = sorted.map(r => {
+    const s = String(r.periodo);
+    return s.substring(0, 4) + '-' + s.substring(4);
+  });
+  const consumo = sorted.map(r => r.consumo);
+  const importe = sorted.map(r => r.importe);
+
+  const traceConsumo = {
+    x, y: consumo, type: 'scatter', mode: 'lines+markers',
+    name: 'Consumo (kWh)',
+    line: { color: '#00e676', width: 2.5, shape: 'spline' },
+    marker: { size: 5, color: '#00e676', symbol: 'circle' },
+    fill: 'tozeroy',
+    fillcolor: 'rgba(0,230,118,0.06)',
+    yaxis: 'y',
+    hovertemplate: '<b>%{x}</b><br>Consumo: %{y:,.0f} kWh<extra></extra>',
+  };
+
+  const traceImporte = {
+    x, y: importe, type: 'scatter', mode: 'lines+markers',
+    name: 'Importe (S/)',
+    line: { color: '#ff9100', width: 2, dash: 'dot', shape: 'spline' },
+    marker: { size: 4, color: '#ff9100', symbol: 'diamond' },
+    yaxis: 'y2',
+    hovertemplate: '<b>%{x}</b><br>Importe: S/ %{y:,.0f}<extra></extra>',
+  };
+
+  Plotly.newPlot('trendPlot', [traceConsumo, traceImporte], {
+    ...PLOTLY_LAYOUT_BASE,
+    margin: { l: 65, r: 65, t: 10, b: 60 },
+    xaxis: {
+      type: 'category', gridcolor: 'rgba(99,130,180,0.08)',
+      tickangle: -45, tickfont: { size: 9 },
+    },
+    yaxis: {
+      title: { text: 'Consumo (kWh)', font: { color: '#00e676', size: 11 } },
+      gridcolor: 'rgba(99,130,180,0.08)', tickfont: { color: '#00e676', size: 9 },
+    },
+    yaxis2: {
+      title: { text: 'Importe (S/)', font: { color: '#ff9100', size: 11 } },
+      overlaying: 'y', side: 'right',
+      gridcolor: 'rgba(99,130,180,0.08)', tickfont: { color: '#ff9100', size: 9 },
+    },
+    legend: {
+      orientation: 'h', y: -0.28,
+      font: { size: 10, color: '#7a869a' },
+      bgcolor: 'rgba(0,0,0,0)',
+    },
+    hovermode: 'x unified',
+  }, PLOTLY_CONFIG);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOP DISTRITOS POR TASA DE ANOMALÍA
+   ══════════════════════════════════════════════════════════════════ */
+function renderRateChart(data) {
+  const container = document.getElementById('ratePlot');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="error-msg">⚠️ Datos de tasas por distrito no disponibles</div>';
+    return;
+  }
+
+  const top = data.slice(0, 15).reverse();
+  const labels = top.map(r => r.distrito);
+  const values = top.map(r => r.tasa_anomalia_pct ?? 0);
+  const colors = values.map(v =>
+    v >= 0.05 ? '#ff1744' : v >= 0.02 ? '#ff9100' : '#00e676'
+  );
+
+  const trace = {
+    x: values, y: labels, type: 'bar', orientation: 'h',
+    marker: {
+      color: colors, opacity: 0.9,
+      line: { color: colors.map(c => c + '80'), width: 1 },
+    },
+    text: values.map(v => v.toFixed(4) + '%'),
+    textposition: 'outside',
+    textfont: { size: 9, color: '#7a869a' },
+    hovertemplate: '<b>%{y}</b><br>Tasa: %{x:.4f}%<extra></extra>',
+  };
+
+  Plotly.newPlot('ratePlot', [trace], {
+    ...PLOTLY_LAYOUT_BASE,
+    margin: { l: 130, r: 60, t: 10, b: 30 },
+    xaxis: {
+      title: { text: '% anomalías / registros totales', font: { size: 10 } },
+      gridcolor: 'rgba(99,130,180,0.08)', tickfont: { size: 9 },
+    },
+    yaxis: {
+      gridcolor: 'rgba(99,130,180,0.08)', tickfont: { size: 9 },
+    },
+  }, PLOTLY_CONFIG);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LIVE TABLE — ANOMALÍAS ACTIVAS (z > 3)
+   ══════════════════════════════════════════════════════════════════ */
+function renderLiveTable(records) {
+  const tbody = document.getElementById('liveTableBody');
+  if (!records || records.length === 0) {
+    tbody.innerHTML =
+      '<tr><td colspan="8" class="error-msg">⚠️ Sin anomalías activas con z &gt; 3</td></tr>';
+    return;
+  }
+
+  const sorted = [...records].sort((a, b) => {
+    const za = parseFloat(a.zscore_consumo || a.ZSCORE_CONSUMO || 0);
+    const zb = parseFloat(b.zscore_consumo || b.ZSCORE_CONSUMO || 0);
+    return zb - za;
+  }).slice(0, 30);
+
+  const maxZ = Math.max(...sorted.map(r => parseFloat(r.zscore_consumo || 0)));
+
+  tbody.innerHTML = sorted.map((r, i) => {
+    const z = parseFloat(r.zscore_consumo || r.ZSCORE_CONSUMO || 0);
+    const level = z > 5 ? 'CRÍTICO' : z > 3 ? 'ALTO' : 'Normal';
+    const cls = z > 5 ? 'row-critico' : z > 3 ? 'row-alto' : '';
+    const badge = z > 5 ? 'badge-critico' : z > 3 ? 'badge-alto' : 'badge-normal';
+    const tipo = r.tipo_anomalia || r.TIPO_ANOMALIA || '—';
+    const barWidth = Math.min(100, (z / maxZ) * 100);
+    const barColor = z > 5 ? 'var(--accent-red)' : 'var(--accent-orange)';
+    const consumo = r.consumo_actual || r.CONSUMO || 0;
+    const importe = r.importe_actual || r.IMPORTE || 0;
+    const nroDoc = r.NRO_DOC_FAC || r.nro_doc_fac || r.nro_servicio || '—';
+
+    return `<tr class="${cls}">
+      <td style="color:var(--text-muted)">${i + 1}</td>
+      <td style="font-family:monospace;font-size:11px">${nroDoc}</td>
+      <td>${r.distrito || r.DISTRITO || '—'}</td>
+      <td style="text-align:right">${fmt(consumo)}</td>
+      <td style="text-align:right">${fmt(importe)}</td>
+      <td style="white-space:nowrap">
+        <strong>${z.toFixed(2)}</strong>
+        <span class="zscore-bar" style="width:${barWidth}px;background:${barColor}"></span>
+      </td>
+      <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">${tipo}</td>
+      <td><span class="badge ${badge}">${level}</span></td>
+    </tr>`;
+  }).join('');
+
+  eventCount = records.length;
+  document.getElementById('eventCounter').textContent =
+    'Eventos procesados: ' + fmtInt(eventCount);
+  updateTimestamp();
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TABLAS DE RESUMEN
+   ══════════════════════════════════════════════════════════════════ */
+function renderTariffTable(records) {
+  const tbody = document.getElementById('tariffTableBody');
+  if (!records || records.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="error-msg">—</td></tr>'; return;
+  }
+  tbody.innerHTML = records.slice(0, 15).map(r => {
+    const maxZ = Number(r.max_zscore || 0);
+    const color = maxZ > 5 ? 'var(--accent-red)' : maxZ > 3 ? 'var(--accent-orange)' : 'var(--text-primary)';
+    return `<tr>
+      <td>${r.tarifa || '—'}</td>
+      <td style="text-align:right">${fmtInt(r.total_anomalias)}</td>
+      <td style="text-align:right">${r.promedio_zscore != null ? Number(r.promedio_zscore).toFixed(2) : '—'}</td>
+      <td style="text-align:right;color:${color};font-weight:600">${maxZ.toFixed(2)}</td>
+      <td style="text-align:right">${r.riesgo_alto_pct != null ? Number(r.riesgo_alto_pct).toFixed(1) + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderPortfolioTable(records) {
+  const tbody = document.getElementById('portfolioTableBody');
+  if (!records || records.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="error-msg">—</td></tr>'; return;
+  }
+  tbody.innerHTML = records.slice(0, 15).map(r => {
+    const maxZ = Number(r.max_zscore || 0);
+    const color = maxZ > 5 ? 'var(--accent-red)' : maxZ > 3 ? 'var(--accent-orange)' : 'var(--text-primary)';
+    return `<tr>
+      <td>${r.cartera || '—'}</td>
+      <td style="text-align:right">${fmtInt(r.total_anomalias)}</td>
+      <td style="text-align:right">${r.promedio_zscore != null ? Number(r.promedio_zscore).toFixed(2) : '—'}</td>
+      <td style="text-align:right;color:${color};font-weight:600">${maxZ.toFixed(2)}</td>
+      <td style="text-align:right">${r.riesgo_alto_pct != null ? Number(r.riesgo_alto_pct).toFixed(1) + '%' : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderDeptTable(heatmapData) {
+  const tbody = document.getElementById('deptTableBody');
+  if (!heatmapData || heatmapData.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" class="error-msg">—</td></tr>'; return;
+  }
+  const deptMap = {};
+  heatmapData.forEach(r => {
+    const d = r.departamento || 'OTROS';
+    if (!deptMap[d]) deptMap[d] = { distritos: new Set(), anomalias: 0, total_registros: 0 };
+    deptMap[d].distritos.add(r.distrito);
+    deptMap[d].anomalias += r.anomalias_reales || 0;
+    deptMap[d].total_registros += r.total_registros || 0;
+  });
+  const entries = Object.entries(deptMap).sort((a, b) => b[1].anomalias - a[1].anomalias);
+  tbody.innerHTML = entries.map(([dept, s]) => {
+    const tasa = s.total_registros ? (s.anomalias / s.total_registros * 100).toFixed(4) : '0.0000';
+    return `<tr>
+      <td>${dept}</td>
+      <td style="text-align:center">${s.distritos.size}</td>
+      <td style="text-align:right">${fmtInt(s.anomalias)}</td>
+      <td style="text-align:right">${tasa}%</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CARGA INICIAL
+   ══════════════════════════════════════════════════════════════════ */
+async function loadDashboard() {
+  // Cargar todos los JSON en paralelo
+  const [kpis, heatmap, risk, trend, rates, sim, summaries] = await Promise.all([
+    fetchJSON(DATA_DIR + '/kpis.json'),
+    fetchJSON(DATA_DIR + '/district_heatmap.json'),
+    fetchJSON(DATA_DIR + '/corrected_risk.json'),
+    fetchJSON(DATA_DIR + '/batch_trend.json'),
+    fetchJSON(DATA_DIR + '/chart_districts_rate.json'),
+    fetchJSON(DATA_DIR + '/simulated_stream.json'),
+    fetchJSON(DATA_DIR + '/summaries.json'),
+  ]);
+
+  // Renderizar KPIs (necesita heatmap para contar distritos)
+  renderKPIs(kpis, heatmap && !heatmap.error ? heatmap : null);
+
+  // Renderizar gráficos
+  renderHeatmap(heatmap && !heatmap.error ? heatmap : null);
+  renderRisk(risk && !risk.error ? risk : null);
+  renderBatchTrend(trend && !trend.error ? trend : null);
+  renderRateChart(rates && !rates.error ? rates : null);
+
+  // Renderizar tabla LIVE
+  renderLiveTable(sim && !sim.error ? sim : null);
+
+  // Renderizar tablas de resumen
+  if (summaries && !summaries.error) {
+    renderTariffTable(summaries.by_tariff);
+    renderPortfolioTable(summaries.by_cartera);
+  }
+  renderDeptTable(heatmap && !heatmap.error ? heatmap : null);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   REFRESH AUTOMÁTICO (tabla LIVE cada 5s)
+   ══════════════════════════════════════════════════════════════════ */
+async function refreshLive() {
+  const sim = await fetchJSON(DATA_DIR + '/simulated_stream.json');
+  if (sim && !sim.error) renderLiveTable(sim);
+}
+
+// Iniciar
+loadDashboard();
+updateTimestamp();
+setInterval(refreshLive, 5000);
+setInterval(updateTimestamp, 1000);
+</script>
+</body>
+</html>

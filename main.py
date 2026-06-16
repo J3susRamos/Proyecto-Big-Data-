@@ -31,7 +31,7 @@ load_dotenv()
 RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "serving_layer"))
 
 # ── Estado global del pipeline ────────────────────────────────────────
-estado_pipeline = {
+PIPELINE_STATE = {
     "inicio": None,
     "fin": None,
     "etapas": {},
@@ -40,7 +40,7 @@ estado_pipeline = {
 }
 
 
-def imprimir_banner():
+def print_banner():
     """
     Imprime el banner de inicio del pipeline.
     """
@@ -55,47 +55,47 @@ def imprimir_banner():
     print()
 
 
-def imprimir_footer():
+def print_footer():
     """
     Imprime el footer de finalizacion del pipeline.
     """
-    duracion = estado_pipeline.get("duracion_total", 0)
+    duration = PIPELINE_STATE.get("duracion_total", 0)
     print()
     print("=" * 70)
     print(f"  PIPELINE FINALIZADO")
-    print(f"  Duracion total: {duracion:.2f} segundos")
-    print(f"  Estado: {'EXITOSO' if estado_pipeline['exitoso'] else 'FALLIDO'}")
-    if estado_pipeline["errores"]:
-        print(f"  Errores: {len(estado_pipeline['errores'])}")
-        for err in estado_pipeline["errores"][-3:]:
+    print(f"  Duracion total: {duration:.2f} segundos")
+    print(f"  Estado: {'EXITOSO' if PIPELINE_STATE['exitoso'] else 'FALLIDO'}")
+    if PIPELINE_STATE["errores"]:
+        print(f"  Errores: {len(PIPELINE_STATE['errores'])}")
+        for err in PIPELINE_STATE["errores"][-3:]:
             print(f"    - {err}")
     print("=" * 70)
     print()
 
 
-def registrar_etapa(nombre, exitosa, duracion, detalles=None):
+def register_stage(name, success, duration, details=None):
     """
     Registra el resultado de una etapa del pipeline.
 
     Parametros:
-        nombre (str): Nombre de la etapa.
-        exitosa (bool): Si la etapa se completo exitosamente.
-        duracion (float): Duracion en segundos.
-        detalles (dict): Detalles adicionales de la etapa.
+        name (str): Nombre de la etapa.
+        success (bool): Si la etapa se completo exitosamente.
+        duration (float): Duracion en segundos.
+        details (dict): Detalles adicionales de la etapa.
     """
-    estado_pipeline["etapas"][nombre] = {
-        "exitosa": exitosa,
-        "duracion_seg": round(duracion, 2),
+    PIPELINE_STATE["etapas"][name] = {
+        "exitosa": success,
+        "duracion_seg": round(duration, 2),
         "timestamp": datetime.now().isoformat(),
-        "detalles": detalles or {}
+        "detalles": details or {}
     }
-    if not exitosa:
-        estado_pipeline["errores"].append(
-            f"Etapa '{nombre}' fallo tras {duracion:.2f}s"
+    if not success:
+        PIPELINE_STATE["errores"].append(
+            f"Etapa '{name}' fallo tras {duration:.2f}s"
         )
 
 
-def ejecutar_loader():
+def execute_loader():
     """
     Ejecuta la etapa LOADER: carga y limpieza de datos.
 
@@ -108,27 +108,27 @@ def ejecutar_loader():
 
     from utils import loader
 
-    inicio = time.time()
+    start_time = time.time()
     try:
-        fact, dim, metricas = loader.ejecutar()
-        exitoso = fact is not None and not fact.empty
-        duracion = time.time() - inicio
+        fact, dim, metrics = loader.execute()
+        success = fact is not None and not fact.empty
+        duration = time.time() - start_time
 
-        registrar_etapa("loader", exitoso, duracion, metricas)
+        register_stage("loader", success, duration, metrics)
 
-        if exitoso:
+        if success:
             print(f"  LOADER exitoso: {len(fact):,} registros en FACT_CONSUMO")
 
-        return exitoso
+        return success
     except Exception as e:
-        duracion = time.time() - inicio
-        registrar_etapa("loader", False, duracion, {"error": str(e)})
+        duration = time.time() - start_time
+        register_stage("loader", False, duration, {"error": str(e)})
         print(f"  LOADER FALLIDO: {e}")
         traceback.print_exc()
         return False
 
 
-def ejecutar_batch():
+def execute_batch():
     """
     Ejecuta la etapa BATCH: procesamiento historico con PySpark.
 
@@ -141,91 +141,91 @@ def ejecutar_batch():
 
     from batch_layer import spark_batch
 
-    inicio = time.time()
+    start_time = time.time()
     try:
-        spark, estadisticas = spark_batch.ejecutar()
-        exitoso = estadisticas is not None
-        duracion = time.time() - inicio
+        spark, statistics, kpis, ranking, trend, analysis, rfm, dept_kpis = spark_batch.execute()
+        success = statistics is not None
+        duration = time.time() - start_time
 
-        metricas = {}
-        if exitoso:
+        metrics = {}
+        if success:
             try:
-                metricas["num_distritos"] = estadisticas.count()
-                metricas["columnas"] = estadisticas.columns
+                metrics["num_distritos"] = statistics.count()
+                metrics["columnas"] = statistics.columns
             except Exception:
                 pass
 
-        registrar_etapa("batch", exitoso, duracion, metricas)
-        return exitoso
+        register_stage("batch", success, duration, metrics)
+        return success
     except Exception as e:
-        duracion = time.time() - inicio
-        registrar_etapa("batch", False, duracion, {"error": str(e)})
+        duration = time.time() - start_time
+        register_stage("batch", False, duration, {"error": str(e)})
         print(f"  BATCH FALLIDO: {e}")
         traceback.print_exc()
         return False
 
 
-def ejecutar_producer(modo="auto"):
+def execute_producer(mode="auto"):
     """
     Ejecuta la etapa PRODUCER: publicacion de eventos a Kafka.
 
     Parametros:
-        modo (str): "real", "simulado" o "auto".
+        mode (str): "real", "simulado" o "auto".
 
     Retorna:
         bool: True si fue exitoso.
     """
     print("\n" + "-" * 60)
-    print(f"ETAPA 3/5: KAFKA PRODUCER — Publicacion de eventos (modo={modo})")
+    print(f"ETAPA 3/5: KAFKA PRODUCER — Publicacion de eventos (modo={mode})")
     print("-" * 60)
 
     from speed_layer import kafka_producer
 
-    inicio = time.time()
+    start_time = time.time()
     try:
-        exitoso = kafka_producer.ejecutar(modo=modo)
-        duracion = time.time() - inicio
-        registrar_etapa("producer", exitoso, duracion, {"modo": modo})
-        return exitoso
+        success = kafka_producer.execute(mode=mode)
+        duration = time.time() - start_time
+        register_stage("producer", success, duration, {"modo": mode})
+        return success
     except Exception as e:
-        duracion = time.time() - inicio
-        registrar_etapa("producer", False, duracion, {"error": str(e)})
+        duration = time.time() - start_time
+        register_stage("producer", False, duration, {"error": str(e)})
         print(f"  PRODUCER FALLIDO: {e}")
         traceback.print_exc()
         return False
 
 
-def ejecutar_streaming(modo="auto"):
+def execute_streaming(mode="auto"):
     """
     Ejecuta la etapa STREAMING: consumo y clasificacion de anomalias.
 
     Parametros:
-        modo (str): "real", "simulado" o "auto".
+        mode (str): "real", "simulado" o "auto".
 
     Retorna:
         bool: True si fue exitoso.
     """
     print("\n" + "-" * 60)
-    print(f"ETAPA 4/5: SPARK STREAMING — Consumo y clasificacion (modo={modo})")
+    print(f"ETAPA 4/5: SPARK STREAMING — Consumo y clasificacion (modo={mode})")
     print("-" * 60)
 
     from speed_layer import spark_streaming
 
-    inicio = time.time()
+    start_time = time.time()
     try:
-        exitoso = spark_streaming.ejecutar(modo=modo)
-        duracion = time.time() - inicio
-        registrar_etapa("streaming", exitoso, duracion, {"modo": modo})
-        return exitoso
+        success = spark_streaming.execute(mode=mode)
+        duration = time.time() - start_time
+        register_stage("streaming", success, duration, {"modo": mode})
+        return success
     except Exception as e:
-        duracion = time.time() - inicio
-        registrar_etapa("streaming", False, duracion, {"error": str(e)})
+        duration = time.time() - start_time
+        register_stage("streaming", False, duration, {"error": str(e)})
         print(f"  STREAMING FALLIDO: {e}")
         traceback.print_exc()
         return False
 
 
-def ejecutar_serving():
+def execute_serving():
     """
     Ejecuta la etapa SERVING: union batch+stream, dashboard y KPIs.
 
@@ -238,21 +238,21 @@ def ejecutar_serving():
 
     from serving_layer import serving
 
-    inicio = time.time()
+    start_time = time.time()
     try:
-        exitoso = serving.ejecutar()
-        duracion = time.time() - inicio
-        registrar_etapa("serving", exitoso, duracion)
-        return exitoso
+        success = serving.execute()
+        duration = time.time() - start_time
+        register_stage("serving", success, duration)
+        return success
     except Exception as e:
-        duracion = time.time() - inicio
-        registrar_etapa("serving", False, duracion, {"error": str(e)})
+        duration = time.time() - start_time
+        register_stage("serving", False, duration, {"error": str(e)})
         print(f"  SERVING FALLIDO: {e}")
         traceback.print_exc()
         return False
 
 
-def generar_reporte_final():
+def generate_final_report():
     """
     Genera el reporte final del pipeline con todas las metricas.
 
@@ -260,60 +260,60 @@ def generar_reporte_final():
         dict: Reporte completo del pipeline.
     """
     try:
-        duracion_total = time.time() - estado_pipeline["inicio"]
-        estado_pipeline["duracion_total"] = duracion_total
-        estado_pipeline["fin"] = datetime.now().isoformat()
+        total_duration = time.time() - PIPELINE_STATE["inicio"]
+        PIPELINE_STATE["duracion_total"] = total_duration
+        PIPELINE_STATE["fin"] = datetime.now().isoformat()
 
-        etapas_exitosas = sum(
-            1 for e in estado_pipeline["etapas"].values() if e["exitosa"]
+        successful_stages = sum(
+            1 for e in PIPELINE_STATE["etapas"].values() if e["exitosa"]
         )
-        etapas_totales = len(estado_pipeline["etapas"])
-        estado_pipeline["exitoso"] = (
-            etapas_exitosas == etapas_totales and etapas_totales > 0
+        total_stages = len(PIPELINE_STATE["etapas"])
+        PIPELINE_STATE["exitoso"] = (
+            successful_stages == total_stages and total_stages > 0
         )
 
-        reporte = {
+        report = {
             "pipeline": "Hidrandina Lambda - Deteccion de Anomalias",
-            "inicio": estado_pipeline["inicio"],
-            "fin": estado_pipeline["fin"],
-            "duracion_total_seg": round(duracion_total, 2),
-            "etapas_ejecutadas": etapas_totales,
-            "etapas_exitosas": etapas_exitosas,
-            "etapas_fallidas": etapas_totales - etapas_exitosas,
-            "exitoso": estado_pipeline["exitoso"],
-            "etapas": estado_pipeline["etapas"],
-            "errores": estado_pipeline["errores"]
+            "inicio": datetime.fromtimestamp(PIPELINE_STATE["inicio"]).isoformat(),
+            "fin": PIPELINE_STATE["fin"],
+            "duracion_total_seg": round(total_duration, 2),
+            "etapas_ejecutadas": total_stages,
+            "etapas_exitosas": successful_stages,
+            "etapas_fallidas": total_stages - successful_stages,
+            "exitoso": PIPELINE_STATE["exitoso"],
+            "etapas": PIPELINE_STATE["etapas"],
+            "errores": PIPELINE_STATE["errores"]
         }
 
         # Cargar reportes individuales de cada capa si existen
-        for nombre_reporte in [
+        for report_name in [
             "reporte_calidad.json",
             "reporte_batch.json",
             "reporte_streaming.json",
             "reporte_kpis.json"
         ]:
-            ruta = os.path.join(RUTA_SERVING, nombre_reporte)
-            if os.path.exists(ruta):
+            path = os.path.join(RUTA_SERVING, report_name)
+            if os.path.exists(path):
                 try:
-                    with open(ruta, "r", encoding="utf-8") as f:
-                        reporte[nombre_reporte.replace(".json", "")] = json.load(f)
+                    with open(path, "r", encoding="utf-8") as f:
+                        report[report_name.replace(".json", "")] = json.load(f)
                 except Exception:
                     pass
 
         # Guardar reporte final
-        ruta_reporte = os.path.join(RUTA_SERVING, "reporte_pipeline_completo.json")
-        os.makedirs(os.path.dirname(ruta_reporte), exist_ok=True)
-        with open(ruta_reporte, "w", encoding="utf-8") as f:
-            json.dump(reporte, f, indent=2, ensure_ascii=False)
+        report_path = os.path.join(RUTA_SERVING, "reporte_pipeline_completo.json")
+        os.makedirs(os.path.dirname(report_path), exist_ok=True)
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
 
-        print(f"\n  Reporte final guardado: {ruta_reporte}")
-        return reporte
+        print(f"\n  Reporte final guardado: {report_path}")
+        return report
     except Exception as e:
         print(f"ERROR generando reporte final: {e}")
         return {}
 
 
-def verificar_dependencias():
+def check_dependencies():
     """
     Verifica que todas las dependencias del proyecto esten instaladas.
 
@@ -321,21 +321,22 @@ def verificar_dependencias():
         bool: True si todas las dependencias estan disponibles.
     """
     print("Verificando dependencias...")
-    dependencias = [
+    dependencies = [
         ("pyspark", "pyspark.sql"),
         ("pandas", "pandas"),
         ("matplotlib", "matplotlib"),
         ("numpy", "numpy"),
+        ("python-dotenv", "dotenv"),
     ]
 
-    todas_ok = True
-    for nombre, modulo in dependencias:
+    all_ok = True
+    for name, module in dependencies:
         try:
-            importlib.import_module(modulo)
-            print(f"  [OK] {nombre}")
+            importlib.import_module(module)
+            print(f"  [OK] {name}")
         except ImportError:
-            print(f"  [FALTA] {nombre}")
-            todas_ok = False
+            print(f"  [FALTA] {name}")
+            all_ok = False
 
     # kafka-python es opcional
     try:
@@ -344,7 +345,7 @@ def verificar_dependencias():
     except ImportError:
         print(f"  [OPCIONAL] kafka-python no instalado (modo simulado)")
 
-    return todas_ok
+    return all_ok
 
 
 def main():
@@ -354,20 +355,20 @@ def main():
     Procesa argumentos de linea de comandos y ejecuta las etapas
     solicitadas en el orden correcto.
     """
-    imprimir_banner()
+    print_banner()
 
     # Procesar argumentos
     args = sys.argv[1:]
-    etapas_solicitadas = []
-    modo_simulado = False
+    requested_stages = []
+    simulated_mode = False
 
     i = 0
     while i < len(args):
         if args[i] == "--etapa" and i + 1 < len(args):
-            etapas_solicitadas.append(args[i + 1].lower())
+            requested_stages.append(args[i + 1].lower())
             i += 2
         elif args[i] == "--simulado":
-            modo_simulado = True
+            simulated_mode = True
             i += 1
         elif args[i] == "--help" or args[i] == "-h":
             print("Uso: python main.py [opciones]")
@@ -386,11 +387,11 @@ def main():
             print(f"Argumento desconocido: {args[i]}")
             i += 1
 
-    if not etapas_solicitadas:
-        etapas_solicitadas = ["loader", "batch", "producer", "streaming", "serving"]
+    if not requested_stages:
+        requested_stages = ["loader", "batch", "producer", "streaming", "serving"]
 
     # Verificar dependencias
-    if not verificar_dependencias():
+    if not check_dependencies():
         print("\nADVERTENCIA: Faltan dependencias. El pipeline podria fallar.")
         respuesta = input("  Continuar de todas formas? (s/N): ")
         if respuesta.lower() != "s":
@@ -398,48 +399,48 @@ def main():
             return
 
     # Registrar inicio
-    estado_pipeline["inicio"] = datetime.now().isoformat()
+    PIPELINE_STATE["inicio"] = time.time()
 
     # Mapa de etapas
-    mapa_etapas = {
-        "loader": ejecutar_loader,
-        "batch": ejecutar_batch,
-        "producer": lambda: ejecutar_producer("simulado" if modo_simulado else "auto"),
-        "streaming": lambda: ejecutar_streaming("simulado" if modo_simulado else "auto"),
-        "serving": ejecutar_serving,
+    stages_map = {
+        "loader": execute_loader,
+        "batch": execute_batch,
+        "producer": lambda: execute_producer("simulado" if simulated_mode else "auto"),
+        "streaming": lambda: execute_streaming("simulado" if simulated_mode else "auto"),
+        "serving": execute_serving,
     }
 
     # Ejecutar etapas en orden
-    print(f"\nEtapas a ejecutar: {', '.join(etapas_solicitadas)}")
-    if modo_simulado:
+    print(f"\nEtapas a ejecutar: {', '.join(requested_stages)}")
+    if simulated_mode:
         print("Modo: SIMULADO (sin Kafka)")
 
-    pipeline_exitoso = True
-    for etapa in etapas_solicitadas:
-        if etapa in mapa_etapas:
+    pipeline_successful = True
+    for stage in requested_stages:
+        if stage in stages_map:
             try:
-                resultado = mapa_etapas[etapa]()
-                if not resultado:
-                    pipeline_exitoso = False
-                    print(f"\n  [ADVERTENCIA] Etapa '{etapa}' reporto fallo.")
-                    continuar = input("  Continuar con la siguiente etapa? (S/n): ")
-                    if continuar.lower() == "n":
+                result = stages_map[stage]()
+                if not result:
+                    pipeline_successful = False
+                    print(f"\n  [ADVERTENCIA] Etapa '{stage}' reporto fallo.")
+                    continue_prompt = input("  Continuar con la siguiente etapa? (S/n): ")
+                    if continue_prompt.lower() == "n":
                         print("Pipeline detenido por el usuario.")
                         break
             except Exception as e:
-                pipeline_exitoso = False
-                print(f"\n  [ERROR] Etapa '{etapa}' lanzo excepcion: {e}")
+                pipeline_successful = False
+                print(f"\n  [ERROR] Etapa '{stage}' lanzo excepcion: {e}")
                 traceback.print_exc()
-                continuar = input("  Continuar con la siguiente etapa? (S/n): ")
-                if continuar.lower() == "n":
+                continue_prompt = input("  Continuar con la siguiente etapa? (S/n): ")
+                if continue_prompt.lower() == "n":
                     print("Pipeline detenido por el usuario.")
                     break
         else:
-            print(f"  Etapa desconocida: '{etapa}'. Opciones: {list(mapa_etapas.keys())}")
+            print(f"  Etapa desconocida: '{stage}'. Opciones: {list(stages_map.keys())}")
 
     # Generar reporte final
-    generar_reporte_final()
-    imprimir_footer()
+    generate_final_report()
+    print_footer()
 
 
 if __name__ == "__main__":

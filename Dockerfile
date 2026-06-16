@@ -53,9 +53,16 @@ COPY utils/ ./utils/
 COPY batch_layer/ ./batch_layer/
 COPY speed_layer/ ./speed_layer/
 COPY serving_layer/ ./serving_layer/
+COPY serve_dashboard.py .
+COPY entrypoint.sh .
+
+# ── Copiar dashboard.html y JSONs pre-computados a la carpeta de salida ─
+RUN mkdir -p /app/output/dashboard_data && \
+    cp /app/serving_layer/dashboard.html /app/output/dashboard.html && \
+    cp /app/serving_layer/dashboard_data/*.json /app/output/dashboard_data/
 
 # ── Crear directorios de datos y resultados ─────────────────────────────
-RUN mkdir -p /app/data /app/output /app/checkpoint
+RUN mkdir -p /app/data /app/checkpoint
 
 # ── Variables de entorno por defecto ─────────────────────────────────────
 ENV RUTA_PROYECTO=/app
@@ -66,6 +73,8 @@ ENV SPARK_MASTER=local[*]
 ENV KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 ENV KAFKA_TOPIC=hidrandina-consumo
 ENV PYTHONUNBUFFERED=1
+ENV MODO=simulado
 
-# ── Entry point: main.py con argumentos por defecto ─────────────────────
-ENTRYPOINT ["python", "main.py"]
+# ── Entry point: entrypoint.sh ──────────────────────────────────────────
+RUN chmod +x /app/entrypoint.sh
+ENTRYPOINT ["/app/entrypoint.sh"]

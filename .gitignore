@@ -16,11 +16,18 @@ serving_layer/batch_results/
 serving_layer/stream_results/
 serving_layer/*.csv
 serving_layer/*.png
+serving_layer/fact_anomalies.json
+serving_layer/reporte_*.json
 serving_layer/*.json
 
 # Resultados de speed layer
 speed_layer/FACT_ANOMALIAS_STREAM/
 speed_layer/*.csv
+
+# ── Outputs temporales de speed layer ────────────────────────────────────
+FACT_ANOMALIAS_STREAM/
+reporte_streaming.json
+tmp/
 
 # ── Cache de Python ──────────────────────────────────────────────────────
 __pycache__/

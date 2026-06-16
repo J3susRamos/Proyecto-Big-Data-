@@ -1,0 +1,72 @@
+[
+  {
+    "nro_servicio": 0.0,
+    "distrito": "LA ESPERANZA",
+    "consumo_actual": 16302.0,
+    "zscore_consumo": 66.5376,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "VICTOR LARCO HERRERA",
+    "consumo_actual": 21125.0,
+    "zscore_consumo": 58.085,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "CHEPEN",
+    "consumo_actual": 14700.84,
+    "zscore_consumo": 56.1023,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "CELENDIN",
+    "consumo_actual": 8159.0,
+    "zscore_consumo": 49.8069,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "INDEPENDENCIA",
+    "consumo_actual": 11580.0,
+    "zscore_consumo": 48.1665,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "YUNGAY",
+    "consumo_actual": 11879.0,
+    "zscore_consumo": 47.8784,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "CAJAMARCA",
+    "consumo_actual": 11288.0,
+    "zscore_consumo": 46.4605,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "CATAC",
+    "consumo_actual": 9644.0,
+    "zscore_consumo": 44.0417,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "CHICAMA",
+    "consumo_actual": 11580.0,
+    "zscore_consumo": 43.7917,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  },
+  {
+    "nro_servicio": 0.0,
+    "distrito": "SINSICAP",
+    "consumo_actual": 2072.0,
+    "zscore_consumo": 43.1238,
+    "tipo_anomalia": "Consumo extremadamente alto"
+  }
+]

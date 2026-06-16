@@ -130,21 +130,22 @@ Variables disponibles: `RUTA_CSV_ORIGINALES`, `RUTA_DATA`, `RUTA_SERVING`, `RUTA
 | OE4 | FACT_ANOMALIAS_CONSUMO íntegro | 17 cols, 0 nulos z-score, 100% flag_anomalia |
 | OE5 | 4 outputs de serving | FACT + 3 resúmenes generados |
 
-### Cómo Ejecutar
+### Cómo Ejecutar (para usuarios)
+
 ```bash
-# Con Docker (recomendado)
-cp .env.example .env
-# Colocar CSV en data/originales/
+# Solo ver el dashboard (datos pre-computados incluidos) — RECOMENDADO
 docker-compose up --build
 
-# Sin Docker
-pip install -r requirements.txt  # + Java 17 + Spark 4.1.2
-python main.py
+# Ejecutar pipeline completo y luego ver dashboard
+MODO=full docker-compose up --build
 
-# Etapa específica
-python main.py --etapa loader
-python main.py --etapa batch
-python main.py --simulado         # Sin Kafka
+# Sin Docker (solo dashboard, requiere Python + JSONs pre-computados)
+pip install -r requirements.txt
+python serve_dashboard.py
+# Abrir http://localhost:8050/dashboard.html
+
+# Sin Docker (pipeline completo, requiere Java 17 + Spark 4.1.2)
+python main.py --simulado
 ```
 
 ### Reglas para modificar código

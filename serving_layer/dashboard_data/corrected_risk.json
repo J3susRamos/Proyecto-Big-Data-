@@ -1,0 +1,12 @@
+[
+  {
+    "nivel_riesgo": "Anomalía real (z>3)",
+    "cantidad": 4577,
+    "pct": 0.92
+  },
+  {
+    "nivel_riesgo": "Consumo normal (z≤3)",
+    "cantidad": 495425,
+    "pct": 99.08
+  }
+]

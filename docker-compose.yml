@@ -67,13 +67,13 @@ services:
       dockerfile: Dockerfile
     container_name: hidrandina-pipeline
     hostname: pipeline
-    depends_on:
-      kafka:
-        condition: service_healthy
-      zookeeper:
-        condition: service_healthy
+    stdin_open: true
+    tty: true
     environment:
-      # Kafka (usa nombre del servicio docker-compose como hostname)
+      # Modo: "dashboard" (solo ver dashboard, por defecto) o "full" (ejecutar pipeline)
+      MODO: dashboard
+
+      # Kafka (solo si MODO=real)
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: hidrandina-consumo
 
@@ -88,11 +88,12 @@ services:
 
       # Python
       PYTHONUNBUFFERED: "1"
+    ports:
+      # Dashboard web
+      - "8050:8050"
     volumes:
-      # Mapear los CSV de datos (crear carpeta local con los CSV de Hidrandina)
+      # Mapear los CSV de datos (el usuario debe colocar los CSV aqui)
       - ./data:/app/data
-      # Resultados persistentes fuera del contenedor
-      - ./serving_layer:/app/output
     # Asignar suficiente memoria para procesar 30 millones de registros
     deploy:
       resources:
