@@ -136,17 +136,30 @@ Variables disponibles: `RUTA_CSV_ORIGINALES`, `RUTA_DATA`, `RUTA_SERVING`, `RUTA
 # Solo ver el dashboard (datos pre-computados incluidos) — RECOMENDADO
 docker-compose up --build
 
-# Ejecutar pipeline completo y luego ver dashboard
+# Ejecutar pipeline completo (modo simulado, sin Kafka)
 MODO=full docker-compose up --build
+
+# Ejecutar pipeline completo con Kafka real
+docker compose up -d zookeeper kafka
+MODO=real docker compose up --build pipeline
 
 # Sin Docker (solo dashboard, requiere Python + JSONs pre-computados)
 pip install -r requirements.txt
 python serve_dashboard.py
 # Abrir http://localhost:8050/dashboard.html
 
-# Sin Docker (pipeline completo, requiere Java 17 + Spark 4.1.2)
+# Sin Docker (pipeline completo, modo simulado)
 python main.py --simulado
+
+# Sin Docker (pipeline completo, Kafka real)
+python main.py --kafka
 ```
+
+### Topics Kafka
+| Topic | Particiones | Retención | Propósito |
+|-------|-------------|-----------|-----------|
+| `hidrandina-consumo` | 3 | 48h | Eventos de consumo individuales |
+| `hidrandina-alertas` | 1 | 7d | Alertas de consumo anómalo agregado |
 
 ### Reglas para modificar código
 1. No usar rutas Windows hardcodeadas — siempre usar `os.environ.get()` con fallback

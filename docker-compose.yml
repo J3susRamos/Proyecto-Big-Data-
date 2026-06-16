@@ -70,7 +70,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      # Modo: "dashboard" (solo ver dashboard, por defecto) o "full" (ejecutar pipeline)
+      # Modo: "dashboard" (solo ver dashboard, por defecto), "full" (simulado) o "real" (Kafka)
       MODO: dashboard
 
       # Kafka (solo si MODO=real)

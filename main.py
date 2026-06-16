@@ -361,6 +361,7 @@ def main():
     args = sys.argv[1:]
     requested_stages = []
     simulated_mode = False
+    kafka_mode = False
 
     i = 0
     while i < len(args):
@@ -370,12 +371,20 @@ def main():
         elif args[i] == "--simulado":
             simulated_mode = True
             i += 1
+        elif args[i] == "--kafka" or args[i] == "--real":
+            kafka_mode = True
+            i += 1
         elif args[i] == "--help" or args[i] == "-h":
             print("Uso: python main.py [opciones]")
             print("  --etapa NOMBRE   Ejecuta solo una etapa (loader, batch, producer, streaming, serving)")
             print("  --simulado       Usa modo simulado (sin Kafka)")
+            print("  --kafka / --real Usa Kafka real (requiere broker corriendo)")
             print("  --help           Muestra esta ayuda")
             print("  Sin argumentos: ejecuta el pipeline completo")
+            print("\nModos:")
+            print("  Sin flag:         Auto (detecta Kafka, fallback simulado)")
+            print("  --simulado:       Fuerza modo simulado")
+            print("  --kafka / --real: Fuerza modo Kafka real")
             print("\nEtapas disponibles:")
             print("  loader     - Carga y limpia los CSV")
             print("  batch      - Procesa historico con PySpark")
@@ -402,11 +411,25 @@ def main():
     PIPELINE_STATE["inicio"] = time.time()
 
     # Mapa de etapas
+    def get_producer_mode():
+        if simulated_mode:
+            return "simulado"
+        if kafka_mode:
+            return "real"
+        return "auto"
+
+    def get_streaming_mode():
+        if simulated_mode:
+            return "simulado"
+        if kafka_mode:
+            return "real"
+        return "auto"
+
     stages_map = {
         "loader": execute_loader,
         "batch": execute_batch,
-        "producer": lambda: execute_producer("simulado" if simulated_mode else "auto"),
-        "streaming": lambda: execute_streaming("simulado" if simulated_mode else "auto"),
+        "producer": lambda: execute_producer(get_producer_mode()),
+        "streaming": lambda: execute_streaming(get_streaming_mode()),
         "serving": execute_serving,
     }
 
@@ -414,6 +437,8 @@ def main():
     print(f"\nEtapas a ejecutar: {', '.join(requested_stages)}")
     if simulated_mode:
         print("Modo: SIMULADO (sin Kafka)")
+    if kafka_mode:
+        print("Modo: KAFKA REAL")
 
     pipeline_successful = True
     for stage in requested_stages:
