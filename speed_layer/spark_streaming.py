@@ -674,12 +674,12 @@ def kafka_streaming_mode(spark, statistics_df):
         print("ERROR: No se pudo iniciar la consulta de streaming.")
         return False
 
-        print("\nStreaming iniciado. Procesando datos de Kafka...")
-        print("  Timeout: 300s (5 minutos)")
-        print("  Presione Ctrl+C para detener antes.")
+    print("\nStreaming iniciado. Procesando datos de Kafka...")
+    print("  Timeout: 300s (5 minutos)")
+    print("  Presione Ctrl+C para detener antes.")
 
-        try:
-            query.awaitTermination(timeout=300)
+    try:
+        query.awaitTermination(timeout=300)
     except KeyboardInterrupt:
         print("\nStreaming detenido por el usuario.")
         query.stop()
