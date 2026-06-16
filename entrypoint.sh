@@ -7,6 +7,7 @@ set -e
 #   MODO=dashboard  (defecto) — Solo inicia el dashboard con datos pre-computados
 #   MODO=full       — Ejecuta pipeline completo (simulado), luego dashboard
 #   MODO=real       — Ejecuta pipeline completo con Kafka real, luego dashboard
+#   MODO=api        — Inicia solo la API REST de alertas
 # =============================================================================
 
 MODO=${MODO:-dashboard}
@@ -19,7 +20,12 @@ echo "  Modo: ${MODO}"
 echo "=================================================="
 echo ""
 
-if [ "${MODO}" = "full" ]; then
+if [ "${MODO}" = "api" ]; then
+    echo "Iniciando API REST de alertas en puerto ${API_PORT:-8060}..."
+    echo ""
+    exec python -m api.alert_api
+
+elif [ "${MODO}" = "full" ]; then
     echo "Ejecutando pipeline completo (modo simulado)..."
     python main.py --simulado
     echo ""
