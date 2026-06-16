@@ -76,6 +76,14 @@ def load_all_csvs(path=None):
             print("ERROR: No se encontraron archivos CSV en:", path)
             return None
 
+        # ── Muestreo por archivo (MAX_RECORDS) ────────────────────
+        max_records = os.environ.get("MAX_RECORDS")
+        rows_per_file = None
+        if max_records is not None:
+            max_records = int(max_records)
+            rows_per_file = max(1, max_records // len(files))
+            print(f"MAX_RECORDS={max_records:,} → ~{rows_per_file:,} filas por archivo")
+
         print(f"Archivos encontrados: {len(files)}")
         dataframes = []
         for file_path in files:
@@ -85,12 +93,12 @@ def load_all_csvs(path=None):
                 try:
                     df = pd.read_csv(
                         file_path, sep=sep, encoding="latin-1", low_memory=False,
-                        on_bad_lines="skip"
+                        on_bad_lines="skip", nrows=rows_per_file
                     )
                 except UnicodeDecodeError:
                     df = pd.read_csv(
                         file_path, sep=sep, encoding="utf-8", low_memory=False,
-                        on_bad_lines="skip"
+                        on_bad_lines="skip", nrows=rows_per_file
                     )
                 dataframes.append(df)
                 print(f"  OK {os.path.basename(file_path)}: {len(df):,} filas x {len(df.columns)} cols")
@@ -408,16 +416,6 @@ def execute():
     if raw_df is None or raw_df.empty:
         print("ERROR: No hay datos para procesar.")
         return None, None, None
-
-    # ── Muestreo opcional (MAX_RECORDS) ──────────────────────────
-    max_records = os.environ.get("MAX_RECORDS")
-    if max_records is not None:
-        max_records = int(max_records)
-        if len(raw_df) > max_records:
-            raw_df = raw_df.sample(n=max_records, random_state=42)
-            print(f"\n  Muestreo aplicado: {max_records:,} registros (MAX_RECORDS)")
-        else:
-            print(f"\n  MAX_RECORDS ({max_records:,}) > total ({len(raw_df):,}), sin muestreo")
 
     total_original = len(raw_df)
 
