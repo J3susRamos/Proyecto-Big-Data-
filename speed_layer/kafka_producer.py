@@ -145,7 +145,7 @@ def read_ordered_csv(path=None, max_events=500000):
         ordered_rows = sorted(
             rows,
             key=lambda x: (
-                x.get("FECHA_EMISION", "").strip() or "00000000",
+                str(x.get("FECHA_EMISION", "") or "").strip() or "00000000",
                 str(x.get("NRO_DOC_FAC", "0")).strip().zfill(20)
             )
         )
