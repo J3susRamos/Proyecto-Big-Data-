@@ -88,6 +88,7 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
             .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED")
             .config("spark.sql.legacy.timeParserPolicy", "CORRECTED")
             .config("spark.sql.streaming.stopTimeout", "60000")
+            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:4.1.2")
             .getOrCreate()
         )
         spark.sparkContext.setLogLevel("WARN")

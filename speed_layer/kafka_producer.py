@@ -81,10 +81,10 @@ def get_kafka_producer():
             client_id=KAFKA_CLIENT_ID,
             value_serializer=lambda v: json.dumps(v).encode("utf-8"),
             key_serializer=lambda k: str(k).encode("utf-8"),
-            acks="all",
+            acks="1",
             retries=5,
-            batch_size=65536,
-            linger_ms=50,
+            batch_size=131072,
+            linger_ms=200,
             max_block_ms=15000,
             compression_type="gzip"
         )
