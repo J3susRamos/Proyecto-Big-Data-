@@ -28,8 +28,8 @@ ENV PATH="$SPARK_HOME/bin:$PATH"
 ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3
 
-# ── Descargar Spark 4.1.2 (sin Hadoop incluido) ──────────────────────────
-RUN wget -q https://archive.apache.org/dist/spark/spark-4.1.2/spark-4.1.2-bin-without-hadoop.tgz -O /tmp/spark.tgz && \
+# ── Descargar Spark 4.1.2 (con Hadoop 3 incluido) ──────────────────────────
+RUN wget -q https://archive.apache.org/dist/spark/spark-4.1.2/spark-4.1.2-bin-hadoop3.tgz -O /tmp/spark.tgz && \
     mkdir -p $SPARK_HOME && \
     tar -xzf /tmp/spark.tgz -C $SPARK_HOME --strip-components=1 && \
     rm /tmp/spark.tgz
