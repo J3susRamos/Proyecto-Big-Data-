@@ -66,21 +66,23 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
     """
     try:
         # Configurar HADOOP_HOME para Windows (winutils.exe necesario para Parquet)
-        hadoop_home = "C:\\hadoop"
-        os.environ.setdefault("HADOOP_HOME", hadoop_home)
-        os.environ.setdefault("hadoop.home.dir", hadoop_home)
-        # PYSPARK_PYTHON explicito para evitar el stub de Microsoft Store
-        python_path = "C:\\Users\\Roxwell\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
-        os.environ.setdefault("PYSPARK_PYTHON", python_path)
-        os.environ.setdefault("PYSPARK_DRIVER_PYTHON", python_path)
-        hadoop_bin = f"{hadoop_home}\\bin"
-        if hadoop_bin not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = f"{hadoop_bin};{os.environ.get('PATH', '')}"
+        if os.name == "nt":  # Windows
+            hadoop_home = "C:\\hadoop"
+            os.environ.setdefault("HADOOP_HOME", hadoop_home)
+            os.environ.setdefault("hadoop.home.dir", hadoop_home)
+            # PYSPARK_PYTHON explicito para evitar el stub de Microsoft Store
+            python_path = "C:\\Users\\Roxwell\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
+            os.environ.setdefault("PYSPARK_PYTHON", python_path)
+            os.environ.setdefault("PYSPARK_DRIVER_PYTHON", python_path)
+            hadoop_bin = f"{hadoop_home}\\bin"
+            if hadoop_bin not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{hadoop_bin};{os.environ.get('PATH', '')}"
+        # En Linux (Docker): Java y Python ya configurados por el Dockerfile
 
         spark = (
             SparkSession.builder
             .appName(app_name)
-            .config("spark.hadoop.hadoop.home.dir", hadoop_home)
+            .config("spark.hadoop.hadoop.home.dir", os.environ.get("HADOOP_HOME", ""))
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.sql.session.timeZone", "America/Lima")
             .config("spark.sql.streaming.schemaInference", "true")
@@ -88,7 +90,7 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
             .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED")
             .config("spark.sql.legacy.timeParserPolicy", "CORRECTED")
             .config("spark.sql.streaming.stopTimeout", "60000")
-            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:4.1.2")
+            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1")
             .getOrCreate()
         )
         spark.sparkContext.setLogLevel("WARN")
@@ -112,20 +114,40 @@ def read_historical_statistics(spark, path=None):
     """
     try:
         if path is None:
-            path = os.path.join(RUTA_SERVING, "batch_results", "tmp_estadisticas_historicas")
+            # Buscar CSV directamente en batch_results (formato real)
+            ruta_batch = os.environ.get(
+                "RUTA_BATCH_RESULTS",
+                os.path.join(RUTA_SERVING, "batch_results")
+            )
+            csv_path = os.path.join(ruta_batch, "tmp_estadisticas_historicas.csv")
+            parquet_path = os.path.join(ruta_batch, "tmp_estadisticas_historicas")
+
+            if os.path.exists(csv_path):
+                path = csv_path
+            elif os.path.exists(parquet_path):
+                path = parquet_path
+            else:
+                print(f"ERROR: No se encuentra TMP_ESTADISTICAS_HISTORICAS")
+                print(f"  Buscado CSV en: {csv_path}")
+                print(f"  Buscado Parquet en: {parquet_path}")
+                print("  Ejecute primero batch_layer/spark_batch.py")
+                return None
 
         if not os.path.exists(path):
-            # Fallback: buscar en RUTA_DATA directamente
-            path = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS")
-
-        if not os.path.exists(path):
-            print(f"ERROR: No se encuentra TMP_ESTADISTICAS_HISTORICAS")
-            print("  Buscado en: batch_results/tmp_estadisticas_historicas")
-            print("  Buscado en: data/TMP_ESTADISTICAS_HISTORICAS")
-            print("  Ejecute primero batch_layer/spark_batch.py")
+            print(f"ERROR: No se encuentra TMP_ESTADISTICAS_HISTORICAS en {path}")
             return None
 
-        df = spark.read.parquet(path)
+        # Detectar formato por extension
+        if path.endswith(".csv"):
+            df = (
+                spark.read
+                .option("header", "true")
+                .option("inferSchema", "true")
+                .csv(path)
+            )
+        else:
+            df = spark.read.parquet(path)
+
         num_rows = df.count()
         print(f"TMP_ESTADISTICAS_HISTORICAS leido: {num_rows:,} filas")
         print(f"  Columnas: {df.columns}")
@@ -149,7 +171,7 @@ def define_event_schema():
         StructField("IMPORTE", StringType(), True),
         StructField("FECHA_EMISION", StringType(), True),
         StructField("FECHA_VENCIMIENTO", StringType(), True),
-        StructField("FECHA_COSNUMO_DESDE", StringType(), True),
+        StructField("FECHA_CONSUMO_DESDE", StringType(), True),
         StructField("FECHA_CONSUMO_HASTA", StringType(), True),
         StructField("DEPARTAMENTO", StringType(), True),
         StructField("PROVINCIA", StringType(), True),
@@ -309,7 +331,7 @@ def parse_event(df_kafka, schema):
                 col("value_parsed.IMPORTE").cast(DoubleType()).alias("IMPORTE"),
                 col("value_parsed.FECHA_EMISION").cast(TimestampType()).alias("FECHA_EMISION"),
                 col("value_parsed.FECHA_VENCIMIENTO").cast(TimestampType()).alias("FECHA_VENCIMIENTO"),
-                col("value_parsed.FECHA_COSNUMO_DESDE").cast(TimestampType()).alias("FECHA_COSNUMO_DESDE"),
+                col("value_parsed.FECHA_CONSUMO_DESDE").cast(TimestampType()).alias("FECHA_CONSUMO_DESDE"),
                 col("value_parsed.FECHA_CONSUMO_HASTA").cast(TimestampType()).alias("FECHA_CONSUMO_HASTA"),
                 col("value_parsed.DEPARTAMENTO").cast(StringType()).alias("DEPARTAMENTO"),
                 col("value_parsed.PROVINCIA").cast(StringType()).alias("PROVINCIA"),
@@ -675,9 +697,9 @@ def create_region_hourly_alerts(enriched_df):
     try:
         alertas_df = (
             enriched_df
-            .withWatermark("FECHA_EMISION", "1 hour")
+            .withWatermark("kafka_timestamp", "1 hour")
             .groupBy(
-                window(col("FECHA_EMISION"), "1 hour"),
+                window(col("kafka_timestamp"), "1 hour"),
                 col("DEPARTAMENTO"),
                 col("DISTRITO")
             )
@@ -775,7 +797,8 @@ def kafka_streaming_mode(spark, statistics_df):
 
     # Query 2: Alertas por ventana horaria (Capa 3)
     print("\nIniciando agregacion por ventana horaria...")
-    alertas_df = create_region_hourly_alerts(enriched_df)
+    # Pasar df_events (que tiene kafka_timestamp) para alertas por ventana horaria
+    alertas_df = create_region_hourly_alerts(df_events)
     query_alertas = write_alerts_to_kafka(alertas_df)
     if query_alertas is None:
         print("  ADVERTENCIA: No se pudo iniciar alertas.")
@@ -844,7 +867,7 @@ def simulated_streaming_mode(spark, statistics_df):
 
         for col_fecha in [
             "FECHA_EMISION", "FECHA_VENCIMIENTO",
-            "FECHA_COSNUMO_DESDE", "FECHA_CONSUMO_HASTA"
+            "FECHA_CONSUMO_DESDE", "FECHA_CONSUMO_HASTA"
         ]:
             if col_fecha in df_events.columns:
                 df_events = df_events.withColumn(

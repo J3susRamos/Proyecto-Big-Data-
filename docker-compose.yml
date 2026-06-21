@@ -39,6 +39,8 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
@@ -52,13 +54,60 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      test: kafka-topics --bootstrap-server localhost:9092 --list || exit 1
+      test: kafka-topics --bootstrap-server kafka:9092 --list || exit 1
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
     networks:
       - hidrandina-net
+
+  # ── Producer (Speed Layer) ──────────────────────────────────────────
+  producer:
+    image: proyecto-big-data--pipeline:latest
+    container_name: hidrandina-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: hidrandina-consumo
+      RUTA_DATA: /app/data
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/app/data
+    entrypoint: ["python", "speed_layer/kafka_producer.py", "real"]
+    networks:
+      - hidrandina-net
+    profiles:
+      - producer
+
+  # ── Streaming (Speed Layer) ────────────────────────────────────────
+  streaming:
+    image: proyecto-big-data--pipeline:latest
+    container_name: hidrandina-streaming
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: hidrandina-consumo
+      RUTA_DATA: /app/data
+      RUTA_SERVING: /app/output
+      RUTA_PROYECTO: /app
+      RUTA_SPEED: /app/speed_layer
+      RUTA_BATCH_RESULTS: /app/output/batch_results
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/app/data
+      - ./serving_layer:/app/output
+      - ./speed_layer:/app/speed_layer
+      - ./checkpoint:/app/checkpoint
+    entrypoint: ["python", "speed_layer/spark_streaming.py", "real"]
+    networks:
+      - hidrandina-net
+    profiles:
+      - streaming
 
   # ── API REST de Alertas ──────────────────────────────────────────────
   api:

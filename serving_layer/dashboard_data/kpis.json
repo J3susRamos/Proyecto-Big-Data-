@@ -1,17 +1,1 @@
-{
-  "registros_procesados": 27304677,
-  "loader_validez_pct": 88.49,
-  "periodo_label": "Dic 2022 — Jun 2025",
-  "streaming_total": 500002,
-  "anomalias_reales": 4577,
-  "tasa_anomalia_pct": 0.92,
-  "anomalias_critico": 2402,
-  "anomalias_alto": 2175,
-  "anomalias_normales": 495425,
-  "tasa_critico_pct": 0.48,
-  "tasa_alto_pct": 0.43,
-  "tasa_normal_pct": 99.08,
-  "consumo_total_kwh": 3786813434.53,
-  "alertas_criticas": 4577,
-  "facturacion_total_soles": 3395567991.3
-}
+{"registros_procesados": 500000, "loader_validez_pct": 91.45, "anomalias_reales": 175258, "tasa_anomalia_pct": 35.0516, "consumo_total_kwh": 88114023.72670001, "periodo_label": "Periodo de streaming actual", "alertas_criticas": 175258, "facturacion_total_soles": 84570045.4}

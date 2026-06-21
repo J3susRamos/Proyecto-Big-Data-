@@ -7,6 +7,7 @@
 <meta name="description" content="Dashboard de detección de anomalías en consumo eléctrico — Arquitectura Lambda — Hidrandina S.A.">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════════
    RESET & BASE
@@ -537,14 +538,16 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
 <!-- ═══════════════════════════════════════════════════════════════════
      ROW 1: MAPA DE CALOR + DISTRIBUCIÓN DE RIESGO
      ═══════════════════════════════════════════════════════════════════ -->
-<div class="section-title">Análisis Geográfico & Distribución de Riesgo</div>
+<div class="section-title">Analisis Geografico (Coropletico) & Distribucion de Riesgo</div>
 <div class="chart-grid cols-2-1">
   <div class="chart-card animate-in" style="animation-delay:0.1s" id="heatmapCard">
     <div class="chart-header">
-      <span class="chart-title">🗺️ Mapa de Calor por Distrito — Tasa de Anomalías (UBIGEO)</span>
+      <span class="chart-title">🗺️ Mapa Coropletico por Distrito — Tasa de Anomalias (UBIGEO)</span>
       <span class="chart-badge serving">SERVING</span>
     </div>
-    <div class="chart-container tall" id="heatmapPlot"></div>
+    <div class="chart-container tall" id="heatmapPlot" style="position:relative;">
+      <div id="leafletHeatmap" style="width:100%;height:100%;border-radius:8px;"></div>
+    </div>
   </div>
   <div class="chart-card animate-in" style="animation-delay:0.15s" id="riskCard">
     <div class="chart-header">
@@ -711,11 +714,12 @@ const PLOTLY_LAYOUT_BASE = {
   font: { family: 'Inter, sans-serif', color: '#e8edf5', size: 11 },
   margin: { l: 50, r: 30, t: 10, b: 50 },
 };
-const PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
+const PLOTLY_CONFIG = { responsive: true, displayModeBar: false, displaylogo: false };
 const DATA_DIR = 'dashboard_data';
 const API_BASE = 'http://localhost:8060';
 let eventCount = 0;
 let prevAlertIds = new Set();
+
 
 /* ── Utilidades ────────────────────────────────────────────────── */
 function updateTimestamp() {
@@ -887,79 +891,88 @@ function renderKPIs(kpis, heatmapData) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
-   MAPA DE CALOR POR DISTRITO (UBIGEO)
+   MAPA DE CALOR — Leaflet + Leaflet.heat
    ══════════════════════════════════════════════════════════════════ */
+let leafletMapInstance = null;
+let leafletHeatLayer = null;
+
 function renderHeatmap(data) {
-  const container = document.getElementById('heatmapPlot');
+  const container = document.getElementById('leafletHeatmap');
   if (!data || data.length === 0) {
     container.innerHTML = '<div class="error-msg">⚠️ Datos de heatmap no disponibles</div>';
     return;
   }
 
-  const lats = data.map(r => r.lat);
-  const lons = data.map(r => r.lon);
-  const sizes = data.map(r => Math.max(7, Math.log2((r.total_registros || 1)) * 3.5));
-  const colors = data.map(r => r.tasa_anomalia_pct ?? 0);
-  const hover = data.map(r =>
-    '<b>' + (r.distrito || '—') + '</b><br>' +
-    'Depto: ' + (r.departamento || '—') + '<br>' +
-    'UBIGEO: <b>' + (r.ubigeo || '—') + '</b><br>' +
-    'Registros: ' + fmtInt(r.total_registros) + '<br>' +
-    'Anomalías reales (z>3): <b>' + fmtInt(r.anomalias_reales) + '</b><br>' +
-    'Tasa: <b>' + (r.tasa_anomalia_pct ?? 0).toFixed(4) + '%</b><br>' +
-    'Riesgo: ' + (r.riesgo || '—')
-  );
+  // Inicializar el mapa una sola vez, centrado en el norte del Perú
+  if (!leafletMapInstance) {
+    leafletMapInstance = L.map('leafletHeatmap', {
+      zoomControl: true,
+      attributionControl: true,
+    }).setView([-8.0, -78.3], 7);
 
-  const trace = {
-    type: 'scattergeo',
-    lon: lons, lat: lats,
-    mode: 'markers',
-    marker: {
-      size: sizes,
-      color: colors,
-      colorscale: [
-        [0, '#0c1018'],
-        [0.15, '#1a4020'],
-        [0.3, '#4a6a10'],
-        [0.5, '#8a6a00'],
-        [0.7, '#c04000'],
-        [1, '#ff1744'],
-      ],
-      showscale: true,
-      colorbar: {
-        title: { text: '% Anomalías', font: { color: '#7a869a', size: 10 } },
-        tickfont: { color: '#7a869a', size: 9 },
-        thickness: 12, len: 0.5,
-        bgcolor: 'rgba(0,0,0,0)',
-        outlinewidth: 0,
-      },
-      cmin: 0,
-      cmax: Math.max(...colors.filter(c => c > 0), 0.01) * 1.2,
-      line: { color: 'rgba(255,255,255,0.15)', width: 1 },
-      sizemode: 'area', sizeref: 2,
-    },
-    text: hover,
-    hovertemplate: '%{text}<extra></extra>',
-  };
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      subdomains: 'abcd',
+      maxZoom: 19,
+    }).addTo(leafletMapInstance);
+  }
 
-  Plotly.newPlot('heatmapPlot', [trace], {
-    ...PLOTLY_LAYOUT_BASE,
-    margin: { l: 0, r: 0, t: 0, b: 0 },
-    geo: {
-      scope: 'south america',
-      showland: true,
-      landcolor: '#111824',
-      coastlinecolor: '#2a3548',
-      showcountries: true,
-      countrycolor: '#2a3548',
-      showsubunits: true,
-      subunitcolor: '#2a3548',
-      lonaxis: { range: [-82, -76] },
-      lataxis: { range: [-12, -4] },
-      bgcolor: 'rgba(0,0,0,0)',
-      projection: { type: 'mercator' },
+  // Normalizar intensidad: tasa_anomalia_pct -> rango 0.0-1.0
+  const maxTasa = Math.max(...data.map(d => d.tasa_anomalia_pct || 0), 0.001);
+  const puntos = data
+    .filter(d => d.lat != null && d.lon != null)
+    .map(d => {
+      const intensidad = Math.min(1.0, (d.tasa_anomalia_pct || 0) / maxTasa);
+      return [d.lat, d.lon, Math.max(0.15, intensidad)];
+    });
+
+  // Remover capa anterior si existe (para refresh)
+  if (leafletHeatLayer) {
+    leafletMapInstance.removeLayer(leafletHeatLayer);
+  }
+
+  leafletHeatLayer = L.heatLayer(puntos, {
+    radius: 28,
+    blur: 20,
+    maxZoom: 12,
+    gradient: {
+      0.2: '#1a4020',
+      0.4: '#4a6a10',
+      0.6: '#8a6a00',
+      0.8: '#c04000',
+      1.0: '#ff1744',
     },
-  }, PLOTLY_CONFIG);
+  }).addTo(leafletMapInstance);
+
+  // Marcadores con popup informativo por distrito (top 30 por tasa)
+  const topDistritos = [...data]
+    .sort((a, b) => (b.tasa_anomalia_pct || 0) - (a.tasa_anomalia_pct || 0))
+    .slice(0, 30);
+
+  topDistritos.forEach(d => {
+    if (d.lat == null || d.lon == null) return;
+    const marker = L.circleMarker([d.lat, d.lon], {
+      radius: 4,
+      color: '#ff1744',
+      fillColor: '#ff1744',
+      fillOpacity: 0.6,
+      weight: 1,
+    }).addTo(leafletMapInstance);
+
+    marker.bindPopup(
+      '<b>' + (d.distrito || '—') + '</b><br>' +
+      'Depto: ' + (d.departamento || '—') + '<br>' +
+      'UBIGEO: ' + (d.ubigeo || '—') + '<br>' +
+      'Registros: ' + fmtInt(d.total_registros) + '<br>' +
+      'Anomalías (z>3): <b>' + fmtInt(d.anomalias_reales) + '</b><br>' +
+      'Tasa: <b>' + (d.tasa_anomalia_pct || 0).toFixed(4) + '%</b>'
+    );
+  });
+
+  // Forzar recalculo de tamaño (por si el contenedor cambió de tamaño)
+  setTimeout(function () {
+    if (leafletMapInstance) leafletMapInstance.invalidateSize();
+  }, 100);
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -1281,5 +1294,7 @@ fetchAlertasAPI();
 setInterval(refreshLive, 5000);
 setInterval(updateTimestamp, 1000);
 </script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"></script>
 </body>
 </html>

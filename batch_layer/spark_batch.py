@@ -1,5 +1,5 @@
 """
-spark_batch.py — Capa Batch de la Arquitectura Lambda
+spark_batch.py - Capa Batch de la Arquitectura Lambda
 Procesa FACT_CONSUMO y DIM_CLIENTE_UBICACION para generar
 estadisticas historicas, KPIs, rankings y segmentacion RFM.
 
@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from pyspark.sql import SparkSession, functions as F
 from pyspark.sql.types import (
-    StructType, StructField, StringType, IntegerType, FloatType, DateType
+    StructType, StructField, StringType, IntegerType, DoubleType, DateType
 )
 from pyspark.sql.window import Window
 
@@ -44,9 +44,17 @@ def crear_spark_session(app_nombre="Hidrandina_Batch"):
     Crea y configura la sesion Spark optimizada para Windows.
     """
     try:
+        print("\n  [INICIO] Creando Spark Session...")
+        inicio = time.time()
+
         spark = (
             SparkSession.builder
             .appName(app_nombre)
+            .master("local[2]")
+            .config("spark.driver.memory", "3g")
+            .config("spark.executor.memory", "3g")
+            .config("spark.driver.maxResultSize", "1g")
+            .config("spark.sql.files.maxPartitionBytes", "67108864")
             .config("spark.sql.shuffle.partitions", "8")
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
@@ -54,10 +62,17 @@ def crear_spark_session(app_nombre="Hidrandina_Batch"):
             .config("spark.sql.parquet.compression.codec", "snappy")
             .config("spark.sql.parquet.mergeSchema", "false")
             .config("spark.sql.session.timeZone", "America/Lima")
+            .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+            .config("spark.hadoop.io.native.lib.available", "false")
+            .config("spark.hadoop.parquet.enable.summary-metadata", "false")
             .getOrCreate()
         )
-        spark.sparkContext.setLogLevel("WARN")
-        print("  Spark Session creada exitosamente")
+        spark.sparkContext.setLogLevel("ERROR")
+        elapsed = time.time() - inicio
+        print(f"  [OK] Spark Session creada en {elapsed:.2f}s")
+        print(f"       Particiones shuffle: 8")
+        print(f"       Compresion: snappy")
+        print(f"       Memoria driver: 3g | Memoria executor: 3g")
         return spark
     except Exception as e:
         print(f"ERROR creando Spark Session: {e}")
@@ -69,30 +84,69 @@ def crear_spark_session(app_nombre="Hidrandina_Batch"):
 # ──────────────────────────────────────────────────────────────────────
 def cargar_tablas(spark):
     """
-    Lee FACT_CONSUMO y DIM_CLIENTE_UBICACION desde CSV.
+    Lee FACT_CONSUMO y DIM_CLIENTE_UBICACION desde CSV con schema explícito.
     """
     try:
-        print("\n  Cargando FACT_CONSUMO...")
+        print("\n  [INICIO] Cargando FACT_CONSUMO desde:", RUTA_FACT)
+        inicio_fact = time.time()
+
+        schema_fact = StructType([
+            StructField("NRO_DOC_FAC", StringType(), True),
+            StructField("PERIODO", IntegerType(), True),
+            StructField("CONSUMO", DoubleType(), True),
+            StructField("IMPORTE", DoubleType(), True),
+            StructField("FECHA_EMISION", StringType(), True),
+            StructField("FECHA_VENCIMIENTO", StringType(), True),
+            StructField("FECHA_CONSUMO_HASTA", StringType(), True),
+        ])
+
         fact = (
             spark.read
             .option("header", "true")
-            .option("inferSchema", "true")
+            .schema(schema_fact)
             .option("encoding", "UTF-8")
             .csv(RUTA_FACT)
         )
-        filas_fact = fact.count()
-        print(f"    FACT_CONSUMO: {filas_fact:,} filas")
 
-        print("  Cargando DIM_CLIENTE_UBICACION...")
+        # Convertir fechas a DateType para cálculos posteriores
+        for col in ["FECHA_EMISION", "FECHA_VENCIMIENTO", "FECHA_CONSUMO_HASTA"]:
+            if col in fact.columns:
+                fact = fact.withColumn(col, F.to_date(F.col(col), "yyyy-MM-dd"))
+
+        elapsed_fact = time.time() - inicio_fact
+        cols_fact = len(fact.columns)
+        print(f"  [OK] FACT_CONSUMO: {cols_fact} columnas en {elapsed_fact:.2f}s")
+        print(f"       Columnas: {', '.join(fact.columns)}")
+
+        print("\n  [INICIO] Cargando DIM_CLIENTE_UBICACION desde:", RUTA_DIM)
+        inicio_dim = time.time()
+
+        schema_dim = StructType([
+            StructField("NRO_DOC_FAC", StringType(), True),
+            StructField("DEPARTAMENTO", StringType(), True),
+            StructField("PROVINCIA", StringType(), True),
+            StructField("DISTRITO", StringType(), True),
+            StructField("UBIGEO", IntegerType(), True),
+            StructField("TARIFA", StringType(), True),
+            StructField("CARTERA", StringType(), True),
+            StructField("UNIDAD_NEGOCIO", StringType(), True),
+        ])
+
         dim = (
             spark.read
             .option("header", "true")
-            .option("inferSchema", "true")
+            .schema(schema_dim)
             .option("encoding", "UTF-8")
             .csv(RUTA_DIM)
         )
-        filas_dim = dim.count()
-        print(f"    DIM_CLIENTE_UBICACION: {filas_dim:,} filas")
+
+        elapsed_dim = time.time() - inicio_dim
+        cols_dim = len(dim.columns)
+        print(f"  [OK] DIM_CLIENTE_UBICACION: {cols_dim} columnas en {elapsed_dim:.2f}s")
+        print(f"       Columnas: {', '.join(dim.columns)}")
+
+        total_elapsed = elapsed_fact + elapsed_dim
+        print(f"\n  Total carga: {total_elapsed:.2f}s")
 
         return fact, dim
     except Exception as e:
@@ -108,10 +162,14 @@ def hacer_join(fact, dim):
     Une FACT_CONSUMO y DIM_CLIENTE_UBICACION por NRO_DOC_FAC.
     """
     try:
-        print("\n  Ejecutando JOIN...")
+        print("\n  [INICIO] JOIN: FACT_CONSUMO -- NRO_DOC_FAC --> DIM_CLIENTE_UBICACION")
+        inicio = time.time()
         df_join = fact.join(dim, on="NRO_DOC_FAC", how="inner")
         filas = df_join.count()
-        print(f"    Filas tras JOIN: {filas:,}")
+        elapsed = time.time() - inicio
+        cols = len(df_join.columns)
+        print(f"  [OK] JOIN completado en {elapsed:.2f}s")
+        print(f"       Filas resultado: {filas:,} x {cols} columnas")
         return df_join
     except Exception as e:
         print(f"ERROR en JOIN: {e}")
@@ -127,7 +185,9 @@ def calcular_estadisticas_historicas(df_join):
     de CONSUMO e IMPORTE. Guarda en tmp_estadisticas_historicas.
     """
     try:
-        print("\n  Calculando TMP_ESTADISTICAS_HISTORICAS...")
+        print("\n  [INICIO] Calculando TMP_ESTADISTICAS_HISTORICAS...")
+        print("           (Agrupar por: DISTRITO + TARIFA + CARTERA)")
+        inicio = time.time()
 
         stats = (
             df_join.groupBy("DISTRITO", "TARIFA", "CARTERA")
@@ -145,7 +205,11 @@ def calcular_estadisticas_historicas(df_join):
         )
 
         filas = stats.count()
-        print(f"    TMP_ESTADISTICAS_HISTORICAS: {filas:,} filas x {len(stats.columns)} cols")
+        elapsed = time.time() - inicio
+        cols = len(stats.columns)
+        print(f"  [OK] Estadisticas históricas en {elapsed:.2f}s")
+        print(f"       Grupos (DISTRITO+TARIFA+CARTERA): {filas:,}")
+        print(f"       Columnas: {cols} (esperadas: 10)")
         return stats
     except Exception as e:
         print(f"ERROR calculando estadisticas historicas: {e}")
@@ -155,13 +219,14 @@ def calcular_estadisticas_historicas(df_join):
 # ──────────────────────────────────────────────────────────────────────
 # 5. KPIS GLOBALES
 # ──────────────────────────────────────────────────────────────────────
-def calcular_kpis_globales(df_join):
+def calcular_kpis_globales(df_join, spark):
     """
     Calcula KPIS del negocio a nivel global.
     Incluye tasa de outliers usando z-score.
     """
     try:
-        print("\n  Calculando KPIs globales...")
+        print("\n  [INICIO] Calculando KPIs globales...")
+        inicio = time.time()
 
         # Estadisticas globales
         stats_global = df_join.agg(
@@ -208,7 +273,7 @@ def calcular_kpis_globales(df_join):
             },
             {
                 "indicador": "total_facturas",
-                "valor": int(total_facturas)
+                "valor": float(total_facturas)
             },
             {
                 "indicador": "ticket_promedio",
@@ -220,20 +285,26 @@ def calcular_kpis_globales(df_join):
             },
             {
                 "indicador": "total_registros",
-                "valor": int(total_registros)
+                "valor": float(total_registros)
             },
             {
                 "indicador": "registros_outliers",
-                "valor": int(outliers)
+                "valor": float(outliers)
             },
             {
                 "indicador": "tasa_outlier_pct",
-                "valor": tasa_outlier
+                "valor": float(tasa_outlier)
             }
         ]
 
         df_kpis = spark.createDataFrame(kpis)
-        print(f"    KPIs globales calculados: {len(kpis)} indicadores")
+        elapsed = time.time() - inicio
+        print(f"  [OK] KPIs calculados en {elapsed:.2f}s")
+        print(f"       Total registros procesados: {total_registros:,}")
+        print(f"       Facturacion total: S/. {facturacion:,.2f}")
+        print(f"       Consumo total: {consumo_total:,.2f} kWh")
+        print(f"       Ticket promedio: S/. {ticket_promedio:,.2f}")
+        print(f"       Registros outliers: {outliers:,} ({tasa_outlier}%)")
         return df_kpis
     except Exception as e:
         print(f"ERROR calculando KPIs globales: {e}")
@@ -248,7 +319,8 @@ def calcular_ranking_departamentos(df_join):
     Agrupa por DEPARTAMENTO: suma de importe, consumo y conteo.
     """
     try:
-        print("\n  Calculando ranking por departamento...")
+        print("\n  [INICIO] Calculando ranking por departamento...")
+        inicio = time.time()
 
         ranking = (
             df_join.groupBy("DEPARTAMENTO")
@@ -261,7 +333,9 @@ def calcular_ranking_departamentos(df_join):
         )
 
         filas = ranking.count()
-        print(f"    Ranking departamentos: {filas:,} filas")
+        elapsed = time.time() - inicio
+        print(f"  [OK] Ranking departamentos en {elapsed:.2f}s")
+        print(f"       Departamentos únicos: {filas:,}")
         return ranking
     except Exception as e:
         print(f"ERROR calculando ranking departamentos: {e}")
@@ -276,7 +350,8 @@ def calcular_tendencia_mensual(df_join):
     Agrupa por PERIODO (aaaamm): suma de importe, consumo y conteo.
     """
     try:
-        print("\n  Calculando tendencia mensual...")
+        print("\n  [INICIO] Calculando tendencia mensual...")
+        inicio = time.time()
 
         tendencia = (
             df_join.groupBy("PERIODO")
@@ -289,7 +364,9 @@ def calcular_tendencia_mensual(df_join):
         )
 
         filas = tendencia.count()
-        print(f"    Tendencia mensual: {filas:,} periodos")
+        elapsed = time.time() - inicio
+        print(f"  [OK] Tendencia mensual en {elapsed:.2f}s")
+        print(f"       Periodos únicos: {filas:,}")
         return tendencia
     except Exception as e:
         print(f"ERROR calculando tendencia mensual: {e}")
@@ -304,7 +381,8 @@ def calcular_analisis_tarifa_cartera(df_join):
     Agrupa por TARIFA y CARTERA: suma de importe, promedio consumo, conteo.
     """
     try:
-        print("\n  Calculando analisis por tarifa y cartera...")
+        print("\n  [INICIO] Calculando análisis por TARIFA y CARTERA...")
+        inicio = time.time()
 
         analisis = (
             df_join.groupBy("TARIFA", "CARTERA")
@@ -317,7 +395,9 @@ def calcular_analisis_tarifa_cartera(df_join):
         )
 
         filas = analisis.count()
-        print(f"    Analisis tarifa/cartera: {filas:,} filas")
+        elapsed = time.time() - inicio
+        print(f"  [OK] Análisis tarifa/cartera en {elapsed:.2f}s")
+        print(f"       Combinaciones TARIFA+CARTERA: {filas:,}")
         return analisis
     except Exception as e:
         print(f"ERROR calculando analisis tarifa/cartera: {e}")
@@ -333,7 +413,13 @@ def calcular_rfm(df_join):
     y asigna segmento de cliente.
     """
     try:
-        print("\n  Calculando segmentacion RFM...")
+        print("\n  [INICIO] Calculando segmentación RFM por cliente...")
+        inicio = time.time()
+        print("           R=Recency(dias), F=Frequency(periodos), M=Monetary(importe)")
+
+        # Asegurar que FECHA_EMISION sea DateType antes de operar
+        if "FECHA_EMISION" in df_join.columns:
+            df_join = df_join.withColumn("FECHA_EMISION", F.to_date(F.col("FECHA_EMISION")))
 
         # Fecha maxima del dataset
         fecha_max = df_join.agg(F.max("FECHA_EMISION")).collect()[0][0]
@@ -395,7 +481,19 @@ def calcular_rfm(df_join):
         )
 
         filas = rfm_score.count()
-        print(f"    RFM clientes: {filas:,} segmentados")
+        elapsed = time.time() - inicio
+        
+        # Contar clientes por segmento
+        segmentos = rfm_score.groupBy("segmento").count().collect()
+        seg_dict = {row["segmento"]: row["count"] for row in segmentos}
+        
+        print(f"  [OK] RFM en {elapsed:.2f}s")
+        print(f"       Total clientes analizados: {filas:,}")
+        print(f"       Segmentos:")
+        for seg in ["Champion", "Cliente activo", "En riesgo", "Perdido"]:
+            count = seg_dict.get(seg, 0)
+            pct = (count / filas * 100) if filas > 0 else 0
+            print(f"         - {seg:20s}: {count:7,d} ({pct:5.1f}%)")
         return rfm_score
     except Exception as e:
         print(f"ERROR calculando RFM: {e}")
@@ -407,24 +505,43 @@ def calcular_rfm(df_join):
 # ──────────────────────────────────────────────────────────────────────
 def guardar_resultados(dfs, output_dir):
     """
-    Guarda todos los DataFrames como Parquet en output_dir.
-    Cada DataFrame se guarda en una subcarpeta.
+    Guarda todos los DataFrames como CSV usando pandas
+    (evita Hadoop NativeIO que falla en Windows).
     """
     try:
+        import pandas as pd
         os.makedirs(output_dir, exist_ok=True)
-        print(f"\n  Guardando resultados en: {output_dir}")
+        print(f"\n  [INICIO] Guardando {len(dfs)} tablas en:")
+        print(f"           {output_dir}")
+        inicio = time.time()
 
-        for nombre, df in dfs.items():
-            ruta = os.path.join(output_dir, nombre)
-            (
-                df.write
-                .mode("overwrite")
-                .option("compression", "snappy")
-                .parquet(ruta)
-            )
-            print(f"    {nombre} -> {ruta}")
+        for i, (nombre, df) in enumerate(dfs.items(), 1):
+            ruta = os.path.join(output_dir, f"{nombre}.csv")
+            inicio_tabla = time.time()
+            filas = df.count()
+            cols = len(df.columns)
 
-        print("  Todos los archivos guardados correctamente.")
+            if filas > 500000:
+                # Tablas grandes: guardar en lotes para evitar MemoryError
+                print(f"    [{i}] {nombre:40s} -> {filas:8,d} filas x {cols:2d} cols (guardando en lotes)...")
+                chunk_size = 100000
+                df_order = df.orderBy("NRO_DOC_FAC") if "NRO_DOC_FAC" in df.columns else df
+                total = filas
+                header_written = False
+                for offset in range(0, total, chunk_size):
+                    chunk = df_order.limit(chunk_size).offset(offset).toPandas()
+                    chunk.to_csv(ruta, index=False, encoding="utf-8-sig", mode="a", header=not header_written)
+                    header_written = True
+                elapsed_tabla = time.time() - inicio_tabla
+                print(f"         -> Completado en {elapsed_tabla:.2f}s")
+            else:
+                pdf = df.toPandas()
+                pdf.to_csv(ruta, index=False, encoding="utf-8-sig")
+                elapsed_tabla = time.time() - inicio_tabla
+                print(f"    [{i}] {nombre:40s} -> {filas:8,d} filas x {cols:2d} cols ({elapsed_tabla:.2f}s)")
+
+        elapsed_total = time.time() - inicio
+        print(f"\n  [OK] Todos los archivos guardados en {elapsed_total:.2f}s")
     except Exception as e:
         print(f"ERROR guardando resultados: {e}")
         raise
@@ -474,7 +591,7 @@ def validar_oe2(stats):
 # ──────────────────────────────────────────────────────────────────────
 # 12. EJECUTAR
 # ──────────────────────────────────────────────────────────────────────
-def ejecutar():
+def execute():
     """
     Orquesta todo el pipeline batch y muestra resumen final.
     """
@@ -482,7 +599,7 @@ def ejecutar():
     spark = None
     try:
         print("=" * 60)
-        print("BATCH LAYER — Procesamiento Historico Hidrandina")
+        print("BATCH LAYER - Procesamiento Historico Hidrandina")
         print("=" * 60)
 
         # 1. Spark Session
@@ -496,7 +613,7 @@ def ejecutar():
 
         # 4-9. Calculos
         stats   = calcular_estadisticas_historicas(df_join)
-        kpis    = calcular_kpis_globales(df_join)
+        kpis    = calcular_kpis_globales(df_join, spark)
         ranking = calcular_ranking_departamentos(df_join)
         tendencia = calcular_tendencia_mensual(df_join)
         analisis  = calcular_analisis_tarifa_cartera(df_join)
@@ -531,16 +648,18 @@ def ejecutar():
         print(f"  OE2 cumplido: {'SI' if oe2 else 'NO'}")
         print("=" * 60)
 
-        return stats, kpis, ranking, tendencia, analisis, rfm, oe2
+        return spark, stats, kpis, ranking, tendencia, analisis, rfm, ranking
 
     except Exception as e:
-        print(f"\nERROR en ejecutar: {e}")
+        print(f"\nERROR en execute: {e}")
         elapsed = time.time() - inicio
-        print(f"  Tiempo hasta el fallo: {elapsed:.2f} segundos")
+        print(f"\n  [!]  PIPELINE INTERRUMPIDO tras {elapsed:.2f} segundos")
         raise
     finally:
         if spark is not None:
+            print("\n  [LIMPIEZA] Deteniendo Spark Session...")
             spark.stop()
+            print("  [OK] Spark Session detenida")
             print("  Spark Session cerrada.")
 
 
@@ -548,4 +667,4 @@ def ejecutar():
 # MAIN
 # ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    ejecutar()
+    execute()

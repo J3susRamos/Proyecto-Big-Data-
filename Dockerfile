@@ -1,7 +1,7 @@
 # =============================================================================
 # Dockerfile — Pipeline Lambda Hidrandina (PySpark + Kafka)
 # =============================================================================
-# Base: Python 3.11 slim + OpenJDK 17 (requerido por Spark)
+# Base: Python 3.11 slim + OpenJDK 21 (requerido por Spark)
 # =============================================================================
 
 FROM python:3.11-slim
@@ -12,10 +12,10 @@ LABEL description="Arquitectura Lambda para deteccion de anomalias en consumo el
 # ── Evitar prompts interactivos ──────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ── Instalar Java 17 (requerido por PySpark) ─────────────────────────────
+# ── Instalar Java 21 (requerido por PySpark) ─────────────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        default-jdk-headless \
+        openjdk-21-jdk-headless \
         wget \
         ca-certificates \
         procps \
@@ -28,15 +28,15 @@ ENV PATH="$SPARK_HOME/bin:$PATH"
 ENV PYSPARK_PYTHON=python3
 ENV PYSPARK_DRIVER_PYTHON=python3
 
-# ── Descargar Spark 4.1.2 (con Hadoop 3 incluido) ──────────────────────────
-RUN wget -q https://archive.apache.org/dist/spark/spark-4.1.2/spark-4.1.2-bin-hadoop3.tgz -O /tmp/spark.tgz && \
+# ── Descargar Spark 3.5.1 (con Hadoop 3 incluido) ──────────────────────────
+RUN wget -q https://archive.apache.org/dist/spark/spark-3.5.1/spark-3.5.1-bin-hadoop3.tgz -O /tmp/spark.tgz && \
     mkdir -p $SPARK_HOME && \
     tar -xzf /tmp/spark.tgz -C $SPARK_HOME --strip-components=1 && \
     rm /tmp/spark.tgz
 
 # ── Variables adicionales de Spark ───────────────────────────────────────
 ENV SPARK_DIST_CLASSPATH=$SPARK_HOME/jars/*
-ENV PYTHONPATH="$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-*-src.zip:$PYTHONPATH"
+ENV PYTHONPATH="$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.7-src.zip:$PYTHONPATH"
 
 # ── Establecer directorio de trabajo ─────────────────────────────────────
 WORKDIR /app
@@ -76,5 +76,5 @@ ENV PYTHONUNBUFFERED=1
 ENV MODO=simulado
 
 # ── Entry point: entrypoint.sh ──────────────────────────────────────────
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]

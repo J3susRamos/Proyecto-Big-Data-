@@ -20,7 +20,10 @@ echo "  Modo: ${MODO}"
 echo "=================================================="
 echo ""
 
-if [ "${MODO}" = "api" ]; then
+if [ "${MODO}" = "dashboard" ]; then
+    echo "Modo dashboard: cargando datos pre-computados..."
+
+elif [ "${MODO}" = "api" ]; then
     echo "Iniciando API REST de alertas en puerto ${API_PORT:-8060}..."
     echo ""
     exec python -m api.alert_api
@@ -39,6 +42,11 @@ elif [ "${MODO}" = "real" ]; then
     python main.py --kafka
     echo ""
     echo "Pipeline completado."
+fi
+
+if [ ! -f "/app/serve_dashboard.py" ]; then
+    echo "ERROR: serve_dashboard.py no encontrado en /app"
+    exit 1
 fi
 
 echo "Iniciando dashboard web en http://localhost:8050 ..."

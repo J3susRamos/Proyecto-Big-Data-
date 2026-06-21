@@ -10,6 +10,10 @@ Funciones principales:
     - standardize_text: Convierte texto a mayúsculas y aplica strip
     - validar_calidad: Calcula tasa de registros válidos (KPI OE1)
     - guardar_resultados: Persiste CSV limpio y tablas separadas
+
+Variables de entorno:
+    - MAX_RECORDS_PER_FILE: Máximo de filas por archivo CSV (ej: 100000)
+    - MAX_RECORDS: Total máximo de filas (proporcional por archivo)
 """
 
 import os
@@ -58,12 +62,14 @@ def detect_separator(file_path, num_lines=5):
         return ";"
 
 
-def load_all_csvs(path=None):
+def load_all_csvs(path=None, max_records_per_file=None):
     """
     Lee todos los archivos CSV de la carpeta y los combina en un DataFrame.
 
     Parametros:
         path (str): Directorio con los CSV. Usa RUTA_CSV por defecto.
+        max_records_per_file (int): Máximo de filas a leer por archivo CSV.
+                                    Si es None, usa MAX_RECORDS_PER_FILE de entorno.
 
     Retorna:
         pd.DataFrame: DataFrame combinado, o None si no hay archivos.
@@ -76,13 +82,17 @@ def load_all_csvs(path=None):
             print("ERROR: No se encontraron archivos CSV en:", path)
             return None
 
-        # ── Muestreo por archivo (MAX_RECORDS) ────────────────────
-        max_records = os.environ.get("MAX_RECORDS")
-        rows_per_file = None
-        if max_records is not None:
-            max_records = int(max_records)
-            rows_per_file = max(1, max_records // len(files))
-            print(f"MAX_RECORDS={max_records:,} → ~{rows_per_file:,} filas por archivo")
+        # ── Muestreo por archivo ────────────────────────────────
+        if max_records_per_file is None:
+            max_records_per_file = os.environ.get("MAX_RECORDS_PER_FILE")
+            if max_records_per_file is not None:
+                max_records_per_file = int(max_records_per_file)
+                print(f"MAX_RECORDS_PER_FILE={max_records_per_file:,} filas por archivo")
+            else:
+                max_records_per_file = os.environ.get("MAX_RECORDS")
+                if max_records_per_file is not None:
+                    max_records_per_file = max(1, int(max_records_per_file) // len(files))
+                    print(f"MAX_RECORDS={max_records_per_file:,} filas por archivo (proporcional)")
 
         print(f"Archivos encontrados: {len(files)}")
         dataframes = []
@@ -93,12 +103,12 @@ def load_all_csvs(path=None):
                 try:
                     df = pd.read_csv(
                         file_path, sep=sep, encoding="latin-1", low_memory=False,
-                        on_bad_lines="skip", nrows=rows_per_file
+                        on_bad_lines="skip", nrows=max_records_per_file
                     )
                 except UnicodeDecodeError:
                     df = pd.read_csv(
                         file_path, sep=sep, encoding="utf-8", low_memory=False,
-                        on_bad_lines="skip", nrows=rows_per_file
+                        on_bad_lines="skip", nrows=max_records_per_file
                     )
                 dataframes.append(df)
                 print(f"  OK {os.path.basename(file_path)}: {len(df):,} filas x {len(df.columns)} cols")
@@ -396,7 +406,7 @@ def generate_quality_report(metrics, path=None):
         print(f"ERROR en generate_quality_report: {e}")
 
 
-def execute():
+def execute(max_records_per_file=None):
     """
     Ejecuta el pipeline completo de loader:
     1. Carga todos los CSV
@@ -405,6 +415,10 @@ def execute():
     4. Valida calidad (OE1)
     5. Guarda resultados
 
+    Parametros:
+        max_records_per_file (int): Máximo de filas a leer por archivo CSV.
+                                    Si es None, usa MAX_RECORDS_PER_FILE de entorno.
+
     Retorna:
         tuple: (fact_df, dim_df, metrics) o (None, None, None) si falla.
     """
@@ -412,7 +426,7 @@ def execute():
     print("LOADER — Carga y limpieza del dataset Hidrandina")
     print("=" * 60)
 
-    raw_df = load_all_csvs()
+    raw_df = load_all_csvs(max_records_per_file=max_records_per_file)
     if raw_df is None or raw_df.empty:
         print("ERROR: No hay datos para procesar.")
         return None, None, None
@@ -442,4 +456,5 @@ def execute():
 
 
 if __name__ == "__main__":
-    execute()
+    # Limitado a 100k filas por archivo para evitar sobrecarga de memoria
+    execute(max_records_per_file=100000)

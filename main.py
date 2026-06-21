@@ -95,9 +95,13 @@ def register_stage(name, success, duration, details=None):
         )
 
 
-def execute_loader():
+def execute_loader(max_records_per_file=None):
     """
     Ejecuta la etapa LOADER: carga y limpieza de datos.
+
+    Parametros:
+        max_records_per_file (int): Máximo de filas por archivo CSV.
+                                    Si es None, usa MAX_RECORDS_PER_FILE de entorno.
 
     Retorna:
         bool: True si fue exitoso.
@@ -110,7 +114,7 @@ def execute_loader():
 
     start_time = time.time()
     try:
-        fact, dim, metrics = loader.execute()
+        fact, dim, metrics = loader.execute(max_records_per_file=max_records_per_file)
         success = fact is not None and not fact.empty
         duration = time.time() - start_time
 
@@ -118,6 +122,8 @@ def execute_loader():
 
         if success:
             print(f"  LOADER exitoso: {len(fact):,} registros en FACT_CONSUMO")
+            if max_records_per_file:
+                print(f"  (Limitado a {max_records_per_file:,} filas por archivo CSV)")
 
         return success
     except Exception as e:
@@ -362,6 +368,7 @@ def main():
     requested_stages = []
     simulated_mode = False
     kafka_mode = False
+    max_records_per_file = None
 
     i = 0
     while i < len(args):
@@ -374,11 +381,19 @@ def main():
         elif args[i] == "--kafka" or args[i] == "--real":
             kafka_mode = True
             i += 1
+        elif args[i] == "--max-records-per-file" and i + 1 < len(args):
+            try:
+                max_records_per_file = int(args[i + 1])
+                i += 2
+            except ValueError:
+                print(f"ERROR: --max-records-per-file requiere un numero entero, got {args[i + 1]}")
+                return
         elif args[i] == "--help" or args[i] == "-h":
             print("Uso: python main.py [opciones]")
             print("  --etapa NOMBRE   Ejecuta solo una etapa (loader, batch, producer, streaming, serving)")
             print("  --simulado       Usa modo simulado (sin Kafka)")
             print("  --kafka / --real Usa Kafka real (requiere broker corriendo)")
+            print("  --max-records-per-file N   Limita a N filas por archivo CSV (ej: 100000)")
             print("  --help           Muestra esta ayuda")
             print("  Sin argumentos: ejecuta el pipeline completo")
             print("\nModos:")
@@ -426,7 +441,7 @@ def main():
         return "auto"
 
     stages_map = {
-        "loader": execute_loader,
+        "loader": lambda: execute_loader(max_records_per_file),
         "batch": execute_batch,
         "producer": lambda: execute_producer(get_producer_mode()),
         "streaming": lambda: execute_streaming(get_streaming_mode()),

@@ -48,19 +48,15 @@ def check_kafka_available():
         bool: True si Kafka esta disponible, False en caso contrario.
     """
     try:
-        from kafka import KafkaProducer
-        producer = KafkaProducer(
-            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-            api_version_auto_timeout_ms=3000,
-            max_block_ms=3000,
-            request_timeout_ms=3000
-        )
-        # Si llega hasta aqui sin excepcion, Kafka responde
-        producer.close(timeout=1)
+        from confluent_kafka import Producer
+        from confluent_kafka.admin import AdminClient
+        admin = AdminClient({'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+                             'socket.timeout.ms': 3000})
+        meta = admin.list_topics(timeout=3)
         print(f"  Kafka disponible en {KAFKA_BOOTSTRAP_SERVERS}")
         return True
     except ImportError:
-        print("  kafka-python no instalado. Use: pip install kafka-python")
+        print("  confluent-kafka no instalado. Use: pip install confluent-kafka")
         return False
     except Exception as e:
         print(f"  Kafka NO disponible: {e}")
@@ -72,22 +68,23 @@ def get_kafka_producer():
     Crea un productor Kafka con serializacion JSON.
 
     Retorna:
-        KafkaProducer: Productor listo para enviar, o None si falla.
+        Producer: Productor listo para enviar, o None si falla.
     """
     try:
-        from kafka import KafkaProducer
-        producer = KafkaProducer(
-            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-            client_id=KAFKA_CLIENT_ID,
-            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-            key_serializer=lambda k: str(k).encode("utf-8"),
-            acks="1",
-            retries=5,
-            batch_size=131072,
-            linger_ms=200,
-            max_block_ms=15000,
-            compression_type="gzip"
-        )
+        from confluent_kafka import Producer
+        producer = Producer({
+            'bootstrap.servers': KAFKA_BOOTSTRAP_SERVERS,
+            'client.id': KAFKA_CLIENT_ID,
+            'acks': '1',
+            'retries': 5,
+            'batch.size': 131072,
+            'linger.ms': 50,
+            'compression.type': 'gzip',
+            'message.timeout.ms': 30000,
+            'socket.timeout.ms': 10000,
+            'queue.buffering.max.messages': 1000000,
+            'queue.buffering.max.kbytes': 524288,
+        })
         return producer
     except Exception as e:
         print(f"  ERROR creando productor Kafka: {e}")
@@ -115,11 +112,11 @@ def read_ordered_csv(path=None, max_events=500000):
     """
     try:
         if path is None:
-            path = os.path.join(DATA_PATH, "hidrandina_limpio.csv")
+            path = os.path.join(DATA_PATH, "FACT_CONSUMO.csv")
 
         if not os.path.exists(path):
             print(f"ERROR: No se encuentra el CSV en {path}")
-            fallback_path = os.path.join(DATA_PATH, "hidrandina_limpio.csv")
+            fallback_path = os.path.join(DATA_PATH, "FACT_CONSUMO.csv")
             if os.path.exists(fallback_path):
                 path = fallback_path
                 print(f"  Usando ruta alternativa: {path}")
@@ -129,15 +126,18 @@ def read_ordered_csv(path=None, max_events=500000):
 
         print(f"Leyendo CSV: {path}")
         import pandas as pd
-        rows = []
-        for chunk in pd.read_csv(path, encoding="utf-8-sig", chunksize=10000):
-            for _, row in chunk.iterrows():
-                rows.append(row.to_dict())
-                if max_events > 0 and len(rows) >= max_events:
-                    break
-            print(f"  Registros leidos: {len(rows):,}")
-            if max_events > 0 and len(rows) >= max_events:
+        chunks = []
+        for chunk in pd.read_csv(path, encoding="utf-8-sig", chunksize=50000):
+            chunks.append(chunk)
+            total_leido = sum(len(c) for c in chunks)
+            print(f"  Registros leidos: {total_leido:,}")
+            if max_events > 0 and total_leido >= max_events:
                 break
+
+        df = pd.concat(chunks)
+        if max_events > 0:
+            df = df.head(max_events)
+        rows = df.to_dict(orient="records")
 
         print(f"  Total registros leidos: {len(rows):,}")
 
@@ -167,27 +167,29 @@ def publish_kafka_event(producer, event, key):
     Publica un evento individual al topic de Kafka.
 
     Parametros:
-        producer (KafkaProducer): Productor kafka activo.
+        producer (Producer): Productor kafka activo (confluent_kafka).
         event (dict): Diccionario con los datos del evento.
         key (str): Clave del mensaje (NRO_DOC_FAC).
 
     Retorna:
         bool: True si se confirmo la publicacion.
     """
-    try:
-        future = producer.send(
-            KAFKA_TOPIC,
-            key=key,
-            value=event
-        )
-        future.get(timeout=10)
-        return True
-    except Exception as e:
-        print(f"  Error publicando {key}: {e}")
-        return False
+    while True:
+        try:
+            producer.produce(
+                KAFKA_TOPIC,
+                key=str(key).encode("utf-8"),
+                value=json.dumps(event).encode("utf-8")
+            )
+            return True
+        except BufferError:
+            producer.poll(0.1)
+        except Exception as e:
+            print(f"  Error publicando {key}: {e}")
+            return False
 
 
-def publish_kafka_batch(producer, events, batch_size=500, stream_delay_ms=100, start_time=None):
+def publish_kafka_batch(producer, events, batch_size=5000, stream_delay_ms=0, start_time=None):
     """
     Publica una lista de eventos a Kafka en lotes con reporte de progreso.
 
@@ -211,7 +213,7 @@ def publish_kafka_batch(producer, events, batch_size=500, stream_delay_ms=100, s
             published += 1
 
         if (i + 1) % batch_size == 0:
-            producer.flush()
+            producer.poll(0)
             pct = (i + 1) / total * 100
             rate = published / (time.time() - start_time) if i > 0 else 0
             remaining = (total - i - 1) / rate if rate > 0 else 0
@@ -220,7 +222,9 @@ def publish_kafka_batch(producer, events, batch_size=500, stream_delay_ms=100, s
             if stream_delay_ms > 0:
                 time.sleep(stream_delay_ms / 1000.0)
 
-    producer.flush()
+    remaining = producer.flush(timeout=30)
+    if remaining > 0:
+        print(f"  ADVERTENCIA: {remaining} mensajes no confirmados")
     return published
 
 
@@ -247,7 +251,7 @@ def real_kafka_mode(rows):
 
     start_time = time.time()
     published = publish_kafka_batch(producer, rows, start_time=start_time)
-    producer.close()
+    producer.flush(timeout=30)
     elapsed_time = time.time() - start_time
 
     rate = published / elapsed_time if elapsed_time > 0 else 0
@@ -257,9 +261,9 @@ def real_kafka_mode(rows):
     print(f"  Tasa:       {rate:,.0f} eventos/s")
 
     # Guardar copia JSON para compatibilidad con serving layer
-    # (NRO_DOC_FAC no viaja en el schema de streaming)
-    print("\nGuardando copia local para serving layer...")
-    simulated_mode(rows)
+    # (comentado para acelerar modo real — descomentar si serving layer lo necesita)
+    # print("\nGuardando copia local para serving layer...")
+    # simulated_mode(rows)
 
 
 # =====================================================================
