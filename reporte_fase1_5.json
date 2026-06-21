@@ -1,0 +1,113 @@
+{
+  "fase": "1.5 - Calidad de Datos Categóricos",
+  "registros_analizados": 176826,
+  "variables_categoricas": {
+    "NOMBRE_SERVICIO": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 1241,
+      "raras": 606
+    },
+    "DIRECCION": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 363,
+      "raras": 147
+    },
+    "NRO_IDENTIDAD": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 1,
+      "raras": 0
+    },
+    "NOMBRE_EMPRESA": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 1,
+      "raras": 0
+    },
+    "UNIDAD_NEGOCIO": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 7,
+      "raras": 0
+    },
+    "TARIFA": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 12,
+      "raras": 2
+    },
+    "DEPARTAMENTO": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 3,
+      "raras": 0
+    },
+    "PROVINCIA": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 42,
+      "raras": 2
+    },
+    "DISTRITO": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 289,
+      "raras": 32
+    },
+    "CARTERA": {
+      "nulos": 0,
+      "blancos": 0,
+      "unicos": 2,
+      "raras": 0
+    }
+  },
+  "matriz_tarifa_cartera": {
+    "C": {
+      "AT2": 0,
+      "BT2": 0,
+      "BT3": 0,
+      "BT4": 0,
+      "BT5A": 0,
+      "BT5B": 175756,
+      "BT5D": 29,
+      "BT5E": 140,
+      "BT6": 305,
+      "MT2": 0,
+      "MT3": 0,
+      "MT4": 0,
+      "All": 176230
+    },
+    "M": {
+      "AT2": 1,
+      "BT2": 3,
+      "BT3": 100,
+      "BT4": 63,
+      "BT5A": 15,
+      "BT5B": 0,
+      "BT5D": 0,
+      "BT5E": 0,
+      "BT6": 0,
+      "MT2": 53,
+      "MT3": 227,
+      "MT4": 134,
+      "All": 596
+    },
+    "All": {
+      "AT2": 1,
+      "BT2": 3,
+      "BT3": 100,
+      "BT4": 63,
+      "BT5A": 15,
+      "BT5B": 175756,
+      "BT5D": 29,
+      "BT5E": 140,
+      "BT6": 305,
+      "MT2": 53,
+      "MT3": 227,
+      "MT4": 134,
+      "All": 176826
+    }
+  }
+}

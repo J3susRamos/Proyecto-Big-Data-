@@ -18,6 +18,7 @@ from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, DoubleType, DateType
 )
 from pyspark.sql.window import Window
+from pyspark.storagelevel import StorageLevel
 
 # ──────────────────────────────────────────────────────────────────────
 # RUTAS
@@ -49,6 +50,7 @@ def crear_spark_session(app_nombre="Hidrandina_Batch"):
 
         spark = (
             SparkSession.builder
+            .master(os.environ.get("SPARK_MASTER", "local[*]"))
             .appName(app_nombre)
             .master("local[2]")
             .config("spark.driver.memory", "3g")
@@ -59,6 +61,7 @@ def crear_spark_session(app_nombre="Hidrandina_Batch"):
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.sql.adaptive.coalescePartitions.enabled", "true")
             .config("spark.sql.adaptive.skewJoin.enabled", "true")
+            .config("spark.sql.autoBroadcastJoinThreshold", str(10 * 1024 * 1024))
             .config("spark.sql.parquet.compression.codec", "snappy")
             .config("spark.sql.parquet.mergeSchema", "false")
             .config("spark.sql.session.timeZone", "America/Lima")
@@ -165,6 +168,8 @@ def hacer_join(fact, dim):
         print("\n  [INICIO] JOIN: FACT_CONSUMO -- NRO_DOC_FAC --> DIM_CLIENTE_UBICACION")
         inicio = time.time()
         df_join = fact.join(dim, on="NRO_DOC_FAC", how="inner")
+        df_join = df_join.repartition(128, "DISTRITO", "TARIFA", "CARTERA")
+        df_join = df_join.persist(StorageLevel.MEMORY_AND_DISK)
         filas = df_join.count()
         elapsed = time.time() - inicio
         cols = len(df_join.columns)
@@ -201,6 +206,7 @@ def calcular_estadisticas_historicas(df_join):
                 F.count("*").alias("total_registros")
             )
             .na.fill(0)
+            .repartition(32, "DISTRITO", "TARIFA", "CARTERA")
             .orderBy("DISTRITO", "TARIFA", "CARTERA")
         )
 
@@ -222,6 +228,11 @@ def calcular_estadisticas_historicas(df_join):
 def calcular_kpis_globales(df_join, spark):
     """
     Calcula KPIS del negocio a nivel global.
+    
+    Parametros:
+        spark: SparkSession
+        df_join: DataFrame con JOIN entre FACT y DIM
+    
     Incluye tasa de outliers usando z-score.
     """
     try:
