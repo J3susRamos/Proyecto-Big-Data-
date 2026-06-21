@@ -65,34 +65,30 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
         SparkSession: Sesion de Spark configurada.
     """
     try:
-        import sys
-        
-        # Configurar HADOOP_HOME para Windows (winutils.exe necesario para Parquet)
         if os.name == "nt":  # Windows
-            hadoop_home = "C:\\hadoop"
-            os.environ.setdefault("HADOOP_HOME", hadoop_home)
-            os.environ.setdefault("hadoop.home.dir", hadoop_home)
             # PYSPARK_PYTHON explicito para evitar el stub de Microsoft Store
-            python_path = "C:\\Users\\Roxwell\\AppData\\Local\\Programs\\Python\\Python311\\python.exe"
-            os.environ.setdefault("PYSPARK_PYTHON", python_path)
-            os.environ.setdefault("PYSPARK_DRIVER_PYTHON", python_path)
-            hadoop_bin = f"{hadoop_home}\\bin"
-            if hadoop_bin not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = f"{hadoop_bin};{os.environ.get('PATH', '')}"
-        # En Linux (Docker): Java y Python ya configurados por el Dockerfile
+            python_path = sys.executable
+            os.environ["PYSPARK_PYTHON"] = python_path
+            os.environ["PYSPARK_DRIVER_PYTHON"] = python_path
 
         spark = (
             SparkSession.builder
-            .appName(app_name)
+            .master(os.environ.get("SPARK_MASTER", "local[*]"))
+            .appName("Hidrandina_Streaming")
+            .config("spark.sql.shuffle.partitions", "8")
+            .config("spark.default.parallelism", "8")
+            .config("spark.sql.session.timeZone", "America/Lima")
+            .config("spark.sql.parquet.compression.codec", "snappy")
+            .config("spark.hadoop.mapreduce.fileoutputcommitter.algorithm.version", "2")
+            .config("spark.hadoop.io.native.lib.available", "false")
+            .config("spark.hadoop.parquet.enable.summary-metadata", "false")
             .config("spark.hadoop.hadoop.home.dir", os.environ.get("HADOOP_HOME", ""))
             .config("spark.sql.adaptive.enabled", "true")
-            .config("spark.sql.session.timeZone", "America/Lima")
             .config("spark.sql.streaming.schemaInference", "true")
             .config("spark.sql.parquet.datetimeRebaseModeInWrite", "CORRECTED")
             .config("spark.sql.parquet.datetimeRebaseModeInRead", "CORRECTED")
             .config("spark.sql.legacy.timeParserPolicy", "CORRECTED")
             .config("spark.sql.streaming.stopTimeout", "60000")
-            .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1")
             .getOrCreate()
         )
         spark.sparkContext.setLogLevel("WARN")
@@ -167,7 +163,7 @@ def define_event_schema():
         StructType: Esquema del evento Kafka.
     """
     return StructType([
-        StructField("NRO_SERVICIO", StringType(), True),
+        StructField("NRO_DOC_FAC", StringType(), True),
         StructField("PERIODO", StringType(), True),
         StructField("CONSUMO", StringType(), True),
         StructField("IMPORTE", StringType(), True),
@@ -253,7 +249,7 @@ def read_simulated_stream(spark, path=None):
         rows = []
         for i, evt in enumerate(eventos):
             rows.append(Row(
-                key=str(evt.get("NRO_SERVICIO", "0")),
+                key=str(evt.get("NRO_DOC_FAC", "0")),
                 value=json.dumps(evt),
                 topic=KAFKA_TOPIC,
                 partition=0,
@@ -326,8 +322,8 @@ def parse_event(df_kafka, schema):
             df_kafka
             .withColumn("value_parsed", from_json(col("value").cast("string"), schema))
             .select(
-                col("key").cast("string").alias("nro_servicio_key"),
-                col("value_parsed.NRO_SERVICIO").cast(LongType()).alias("NRO_SERVICIO"),
+                col("key").cast("string").alias("NRO_DOC_FAC_key"),
+                col("value_parsed.NRO_DOC_FAC").cast(StringType()).alias("NRO_DOC_FAC"),
                 col("value_parsed.PERIODO").cast(IntegerType()).alias("PERIODO"),
                 col("value_parsed.CONSUMO").cast(DoubleType()).alias("CONSUMO"),
                 col("value_parsed.IMPORTE").cast(DoubleType()).alias("IMPORTE"),
@@ -361,7 +357,7 @@ def enrich_events(df_events, statistics_df):
     y calculo de z-score y porcentaje de variacion.
 
     12 columnas de salida:
-        NRO_SERVICIO, PERIODO, CONSUMO, IMPORTE, DISTRITO, TARIFA, CARTERA,
+        NRO_DOC_FAC, PERIODO, CONSUMO, IMPORTE, DISTRITO, TARIFA, CARTERA,
         consumo_promedio_historico, importe_promedio_historico,
         desviacion_consumo, zscore_consumo, porcentaje_variacion
 
@@ -375,8 +371,33 @@ def enrich_events(df_events, statistics_df):
     try:
         print("=== GENERANDO TMP_CONSUMO_ENRIQUECIDO ===")
 
-        # JOIN con estadisticas por DISTRITO, TARIFA y CARTERA (FIX 4 APLICADO)
-        enriched_df = df_events.join(
+        # 1. Cargar DIM_CLIENTE_UBICACION para obtener DISTRITO, TARIFA, CARTERA
+        dim_path = os.path.join(os.environ.get("RUTA_DATA", "data"), "DIM_CLIENTE_UBICACION.csv")
+        from pyspark.sql.types import StructType, StructField, StringType
+        schema_dim = StructType([
+            StructField("NRO_DOC_FAC", StringType(), True),
+            StructField("DEPARTAMENTO", StringType(), True),
+            StructField("PROVINCIA", StringType(), True),
+            StructField("DISTRITO", StringType(), True),
+            StructField("UBIGEO", StringType(), True),
+            StructField("TARIFA", StringType(), True),
+            StructField("CARTERA", StringType(), True),
+            StructField("UNIDAD_NEGOCIO", StringType(), True),
+        ])
+        
+        # Como es streaming/simulado, cargamos el csv como DataFrame estatico
+        dim_df = df_events.sparkSession.read.option("header", "true").schema(schema_dim).csv(dim_path)
+        
+        # Si la columna en el evento simulado se llama NRO_DOC_FAC o NRO_DOC_FAC
+        # (El producer envia NRO_DOC_FAC o el fallback NRO_DOC_FAC)
+        join_col = "NRO_DOC_FAC" if "NRO_DOC_FAC" in df_events.columns else "NRO_DOC_FAC"
+        if join_col == "NRO_DOC_FAC":
+            dim_df = dim_df.withColumnRenamed("NRO_DOC_FAC", "NRO_DOC_FAC")
+
+        df_events_dim = df_events.join(dim_df.select(join_col, "DISTRITO", "TARIFA", "CARTERA"), on=join_col, how="left")
+
+        # 2. JOIN con estadisticas por DISTRITO, TARIFA y CARTERA (FIX 4 APLICADO)
+        enriched_df = df_events_dim.join(
             statistics_df.select(
                 "DISTRITO",
                 "TARIFA",
@@ -418,7 +439,7 @@ def enrich_events(df_events, statistics_df):
 
         # Seleccionar las 12 columnas de TMP_CONSUMO_ENRIQUECIDO
         enriched_df = enriched_df.select(
-            col("NRO_SERVICIO"),
+            col("NRO_DOC_FAC"),
             col("PERIODO"),
             col("CONSUMO").alias("consumo_actual"),
             col("IMPORTE").alias("importe_actual"),
@@ -442,7 +463,7 @@ def enrich_events(df_events, statistics_df):
         print(f"ERROR enriqueciendo eventos: {e}")
         import traceback
         traceback.print_exc()
-        return events_df
+        return df_events
 
 
 def classify_anomalies(enriched_df):
@@ -857,7 +878,7 @@ def simulated_streaming_mode(spark, statistics_df):
 
         # Convertir tipos
         for col_name, tipo in [
-            ("NRO_SERVICIO", LongType()),
+            ("NRO_DOC_FAC", StringType()),
             ("PERIODO", IntegerType()),
             ("CONSUMO", DoubleType()),
             ("IMPORTE", DoubleType())
@@ -901,7 +922,7 @@ def simulated_streaming_mode(spark, statistics_df):
 
         # Reordenar columnas segun FACT_ANOMALIAS_CONSUMO (17 columnas)
         cols_final = [
-            "id_anomalia", "NRO_SERVICIO", "PERIODO",
+            "id_anomalia", "NRO_DOC_FAC", "PERIODO",
             "consumo_actual", "importe_actual",
             "DISTRITO", "TARIFA", "CARTERA",
             "consumo_promedio_historico", "importe_promedio_historico",
@@ -912,24 +933,21 @@ def simulated_streaming_mode(spark, statistics_df):
         cols_existentes = [c for c in cols_final if c in anomalies_df.columns]
         final_df = anomalies_df.select(cols_existentes)
 
-        # Guardar resultados
-        output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
-        final_df.coalesce(1).write.mode("overwrite").parquet(output_path)
-        print(f"\nResultados guardados en: {output_path}")
-
-        # Tambien guardar CSV para serving layer
+        # Guardar resultados usando Pandas (evita Hadoop/winutils en Windows)
+        print("\nGuardando resultados de streaming usando Pandas...")
+        pdf = final_df.toPandas()
+        
+        # 1. Carpeta Speed Layer
+        os.makedirs(RUTA_SPEED, exist_ok=True)
         csv_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM.csv")
-        final_df.coalesce(1).write.mode("overwrite") \
-            .option("header", "true") \
-            .option("sep", ",") \
-            .option("encoding", "UTF-8") \
-            .csv(csv_path.replace(".csv", ""))
+        pdf.to_csv(csv_path, index=False, encoding="utf-8-sig")
         print(f"Resultados CSV guardados en: {csv_path}")
 
-        # Copiar a serving layer
-        serving_path = os.path.join(RUTA_SERVING, "datos_streaming.parquet")
-        final_df.coalesce(1).write.mode("overwrite").parquet(serving_path)
-        print(f"Datos copiados a serving layer: {serving_path}")
+        # 2. Copiar a Serving Layer
+        os.makedirs(RUTA_SERVING, exist_ok=True)
+        serving_csv_path = os.path.join(RUTA_SERVING, "datos_streaming.csv")
+        pdf.to_csv(serving_csv_path, index=False, encoding="utf-8-sig")
+        print(f"Datos copiados a serving layer: {serving_csv_path}")
 
         # Estadisticas
         total_anomalies = final_df.count()

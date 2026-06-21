@@ -445,6 +445,78 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
   from { opacity: 0; transform: translateX(40px); }
   to { opacity: 1; transform: translateX(0); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   SIMULADOR TIEMPO REAL (GLASSMORPHISM)
+   ═══════════════════════════════════════════════════════════════════ */
+.sim-container {
+  background: rgba(12, 16, 24, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(68, 138, 255, 0.2);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 28px;
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.sim-container::before {
+  content: ''; position: absolute; top: -50%; left: -50%; width: 200%; height: 200%;
+  background: radial-gradient(circle at center, rgba(68, 138, 255, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+}
+.sim-form {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+.sim-form-group {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.sim-form-group label {
+  font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;
+}
+.sim-form-group input, .sim-form-group select {
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-primary); padding: 10px 14px; font-family: 'Inter', sans-serif; font-size: 13px;
+  transition: var(--transition);
+}
+.sim-form-group input:focus, .sim-form-group select:focus {
+  outline: none; border-color: var(--accent-blue); background: rgba(0,0,0,0.5); box-shadow: 0 0 0 2px rgba(68, 138, 255, 0.2);
+}
+.sim-action {
+  grid-column: span 2; display: flex; justify-content: flex-end; margin-top: 8px;
+}
+.sim-btn {
+  background: linear-gradient(135deg, var(--accent-blue), #2962ff);
+  color: white; border: none; padding: 12px 24px; border-radius: 8px;
+  font-weight: 600; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+  transition: var(--transition); box-shadow: 0 4px 14px rgba(68, 138, 255, 0.3);
+}
+.sim-btn:hover {
+  transform: translateY(-2px); box-shadow: 0 6px 20px rgba(68, 138, 255, 0.4); filter: brightness(1.1);
+}
+.sim-result {
+  background: rgba(0,0,0,0.4); border-radius: var(--radius-sm); padding: 20px;
+  display: flex; flex-direction: column; justify-content: center;
+  border: 1px solid var(--border); position: relative;
+  transition: var(--transition);
+}
+.sim-result-title {
+  font-size: 12px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 12px;
+}
+.sim-status {
+  font-size: 22px; font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+}
+.sim-metric {
+  display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;
+}
+.sim-metric span:first-child { color: var(--text-muted); }
+.sim-metric span:last-child { font-family: monospace; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -536,6 +608,92 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════════
+     SIMULADOR EN TIEMPO REAL (FASTAPI)
+     ═══════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Simulador de Riesgo en Tiempo Real <span class="live-badge" style="margin-left:12px; padding:2px 8px; font-size:10px;"><span class="live-dot"></span> LIVE API</span></div>
+<div class="sim-container animate-in" style="animation-delay:0.35s">
+  <div>
+    <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
+      Ingresa los datos de un consumo para evaluar instantáneamente su nivel de riesgo contra nuestro modelo de reglas batch cargado en memoria.
+    </p>
+    <div class="sim-form">
+      <div class="sim-form-group">
+        <label>Distrito</label>
+        <input type="text" id="simDistrito" value="TRUJILLO" placeholder="Ej: TRUJILLO">
+      </div>
+      <div class="sim-form-group">
+        <label>Consumo Actual (kWh)</label>
+        <input type="number" id="simConsumo" value="1200" placeholder="Ej: 1200">
+      </div>
+      <div class="sim-form-group">
+        <label>Tarifa</label>
+        <select id="simTarifa">
+          <option value="BT5B">BT5B</option>
+          <option value="BT5A">BT5A</option>
+          <option value="MT2">MT2</option>
+          <option value="MT3">MT3</option>
+        </select>
+      </div>
+      <div class="sim-form-group">
+        <label>Cartera</label>
+        <select id="simCartera">
+          <option value="C">C (Corporativo / Comercial)</option>
+          <option value="M">M (Masivo / Residencial)</option>
+        </select>
+      </div>
+      <div class="sim-action">
+        <button class="sim-btn" onclick="simularConsumo()" id="simBtn">
+          <span>Evaluar Riesgo</span>
+          <span style="font-size:16px;">⚡</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- LEYENDA -->
+    <div style="margin-top: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+      <div style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase;">📚 Leyenda de Abreviaturas</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 11px; color: var(--text-muted);">
+        <div>
+          <strong style="color:var(--text-primary);">TARIFA:</strong><br>
+          • <strong>BT5B/BT5A:</strong> Baja Tensión (Residencial)<br>
+          • <strong>MT2/MT3:</strong> Media Tensión (Industrial)
+        </div>
+        <div>
+          <strong style="color:var(--text-primary);">CARTERA:</strong><br>
+          • <strong>C:</strong> Corporativo / Comercial<br>
+          • <strong>M:</strong> Masivo / Residencial
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="sim-result" id="simResultBox">
+    <div class="sim-result-title">Resultado del Análisis API</div>
+    <div style="text-align:center; color:var(--text-muted); font-size:13px; margin:auto;" id="simEmptyState">
+      Haz clic en "Evaluar Riesgo" para procesar el consumo en tiempo real.
+    </div>
+    <div id="simResultData" style="display:none;">
+      <div class="sim-status" id="simStatus">
+        <span id="simStatusIcon">✅</span>
+        <span id="simStatusText">Consumo Normal</span>
+      </div>
+      <div style="font-size:12px; color:var(--text-secondary); margin-bottom:16px; line-height:1.4;" id="simDesc">
+        El consumo se encuentra dentro del rango esperado para este distrito.
+      </div>
+      <div style="background:rgba(255,255,255,0.03); border-radius:6px; padding:12px;">
+        <div class="sim-metric"><span>Z-Score:</span> <span id="simZscore">0.00</span></div>
+        <div class="sim-metric"><span>Variación:</span> <span id="simVar">0.00%</span></div>
+        <div class="sim-metric"><span>Media Histórica:</span> <span id="simProm">0.00 kWh</span></div>
+        <div class="sim-metric"><span>Desv. Estándar:</span> <span id="simStd">0.00</span></div>
+      </div>
+      <div id="simInterpretacionBox" style="margin-top:16px; padding:12px; background:rgba(0,184,212,0.05); border-left:3px solid #00b8d4; border-radius:4px; display:none; transition: all 0.3s ease;">
+        <div style="font-size:11px; font-weight:600; color:#00b8d4; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">💡 Interpretación Analítica</div>
+        <div id="simInterpretacionText" style="font-size:12px; color:var(--text-secondary); line-height:1.5;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════
      ROW 1: MAPA DE CALOR + DISTRIBUCIÓN DE RIESGO
      ═══════════════════════════════════════════════════════════════════ -->
 <div class="section-title">Analisis Geografico (Coropletico) & Distribucion de Riesgo</div>
@@ -547,6 +705,10 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
     </div>
     <div class="chart-container tall" id="heatmapPlot" style="position:relative;">
       <div id="leafletHeatmap" style="width:100%;height:100%;border-radius:8px;"></div>
+      <div id="heatmapInterpretacion" style="position:absolute; bottom:20px; left:20px; z-index:1000; width:calc(100% - 40px); background:rgba(12,16,24,0.85); border:1px solid rgba(255,145,0,0.3); border-left:3px solid #ff9100; border-radius:6px; padding:12px; backdrop-filter:blur(8px); display:none; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+        <div style="font-size:11px; font-weight:600; color:#ff9100; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">🗺️ Insights Geográficos</div>
+        <div id="heatmapInterpretacionText" style="font-size:11.5px; color:#e8edf5; line-height:1.5;"></div>
+      </div>
     </div>
   </div>
   <div class="chart-card animate-in" style="animation-delay:0.15s" id="riskCard">
@@ -716,7 +878,7 @@ const PLOTLY_LAYOUT_BASE = {
 };
 const PLOTLY_CONFIG = { responsive: true, displayModeBar: false, displaylogo: false };
 const DATA_DIR = 'dashboard_data';
-const API_BASE = 'http://localhost:8060';
+const API_BASE = '';
 let eventCount = 0;
 let prevAlertIds = new Set();
 
@@ -960,14 +1122,34 @@ function renderHeatmap(data) {
     }).addTo(leafletMapInstance);
 
     marker.bindPopup(
-      '<b>' + (d.distrito || '—') + '</b><br>' +
-      'Depto: ' + (d.departamento || '—') + '<br>' +
-      'UBIGEO: ' + (d.ubigeo || '—') + '<br>' +
-      'Registros: ' + fmtInt(d.total_registros) + '<br>' +
-      'Anomalías (z>3): <b>' + fmtInt(d.anomalias_reales) + '</b><br>' +
-      'Tasa: <b>' + (d.tasa_anomalia_pct || 0).toFixed(4) + '%</b>'
+      '<div style="text-align:center;margin-bottom:6px;"><b>' + (d.distrito || '—') + '</b></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;">' +
+      '<div>Depto:<br><span style="color:#ff9100">' + (d.departamento || '—') + '</span></div>' +
+      '<div>UBIGEO:<br><span style="color:#00b8d4">' + (d.ubigeo || '—') + '</span></div>' +
+      '<div>Registros:<br><b>' + fmtInt(d.total_registros) + '</b></div>' +
+      '<div>Anomalías:<br><b style="color:#ff1744">' + fmtInt(d.anomalias_reales) + '</b></div>' +
+      '</div>' +
+      '<div style="margin-top:6px;padding-top:6px;border-top:1px solid #444;text-align:center;">Tasa Riesgo: <b>' + (d.tasa_anomalia_pct || 0).toFixed(4) + '%</b></div>'
     );
   });
+
+  // Generar Interpretacion y Insights Geograficos
+  if (topDistritos.length > 0) {
+    const d1 = topDistritos[0];
+    const d2 = topDistritos.length > 1 ? topDistritos[1] : null;
+    const box = document.getElementById('heatmapInterpretacion');
+    const text = document.getElementById('heatmapInterpretacionText');
+    
+    let insight = `El foco crítico (Hotspot) principal se ubica en <b>${d1.distrito}</b> (${d1.departamento}) concentrando <b style="color:#ff1744">${fmtInt(d1.anomalias_reales)} anomalías extremas</b> con la mayor tasa de incidencia de la red (${(d1.tasa_anomalia_pct||0).toFixed(2)}%). `;
+    
+    if (d2) {
+      insight += `En segundo nivel de alarma está <b>${d2.distrito}</b> con ${fmtInt(d2.anomalias_reales)} alertas activas. `;
+    }
+    insight += `<br><span style="color:#7a869a; font-size:10.5px;">Acción sugerida: Desplegar patrullas de revisión técnica prioritariamente a estos "hotspots" ya que representan los sumideros principales de pérdida energética no facturada o conexiones clandestinas masivas.</span>`;
+    
+    text.innerHTML = insight;
+    box.style.display = 'block';
+  }
 
   // Forzar recalculo de tamaño (por si el contenedor cambió de tamaño)
   setTimeout(function () {
@@ -1276,6 +1458,105 @@ async function loadDashboard() {
     renderPortfolioTable(summaries.by_cartera);
   }
   renderDeptTable(heatmap && !heatmap.error ? heatmap : null);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SIMULADOR EN TIEMPO REAL (LLAMADA A FASTAPI)
+   ══════════════════════════════════════════════════════════════════ */
+async function simularConsumo() {
+  const btn = document.getElementById('simBtn');
+  const resultBox = document.getElementById('simResultBox');
+  const emptyState = document.getElementById('simEmptyState');
+  const resultData = document.getElementById('simResultData');
+  
+  const payload = {
+    distrito: document.getElementById('simDistrito').value || "TRUJILLO",
+    tarifa: document.getElementById('simTarifa').value || "BT5B",
+    cartera: document.getElementById('simCartera').value || "C",
+    consumo_actual: parseFloat(document.getElementById('simConsumo').value) || 0,
+    importe_actual: 0
+  };
+
+  btn.innerHTML = '<span>Procesando...</span> ⏳';
+  btn.style.opacity = '0.7';
+  
+  try {
+    const response = await fetch('/api/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) throw new Error('Error en API');
+    const data = await response.json();
+    
+    // UI Update
+    emptyState.style.display = 'none';
+    resultData.style.display = 'block';
+    
+    document.getElementById('simZscore').textContent = data.zscore.toFixed(2);
+    document.getElementById('simVar').textContent = data.porcentaje_variacion.toFixed(2) + '%';
+    document.getElementById('simProm').textContent = data.consumo_promedio.toFixed(2) + ' kWh';
+    document.getElementById('simStd').textContent = data.desviacion_estandar.toFixed(2);
+    
+    const stIcon = document.getElementById('simStatusIcon');
+    const stText = document.getElementById('simStatusText');
+    const desc = document.getElementById('simDesc');
+    
+    // Reset classes
+    resultBox.style.borderColor = 'var(--border)';
+    stText.style.color = 'var(--text-primary)';
+    
+    if (data.nivel_riesgo === 'Alto' || data.nivel_riesgo === 'Crítico') {
+      stIcon.textContent = '🚨';
+      stText.textContent = 'Riesgo ' + data.nivel_riesgo;
+      stText.style.color = 'var(--accent-red)';
+      resultBox.style.borderColor = 'rgba(255,23,68,0.5)';
+      resultBox.style.boxShadow = 'inset 0 0 40px rgba(255,23,68,0.1)';
+      desc.textContent = data.tipo_anomalia;
+    } else if (data.nivel_riesgo === 'Medio') {
+      stIcon.textContent = '⚠️';
+      stText.textContent = 'Riesgo Medio';
+      stText.style.color = 'var(--accent-orange)';
+      resultBox.style.borderColor = 'rgba(255,145,0,0.5)';
+      resultBox.style.boxShadow = 'inset 0 0 40px rgba(255,145,0,0.1)';
+      desc.textContent = data.tipo_anomalia;
+    } else {
+      stIcon.textContent = '✅';
+      stText.textContent = 'Consumo Normal';
+      stText.style.color = 'var(--accent-green)';
+      resultBox.style.borderColor = 'rgba(0,230,118,0.3)';
+      resultBox.style.boxShadow = 'inset 0 0 40px rgba(0,230,118,0.05)';
+      desc.textContent = 'El consumo se encuentra dentro del rango esperado.';
+    }
+    
+    // Generar Interpretacion Analitica
+    const z = data.zscore;
+    const v = data.porcentaje_variacion;
+    let interpretacion = "";
+    
+    if (z > 3) {
+      interpretacion = `El consumo se dispara <b style="color:var(--text-primary)">${z.toFixed(1)} desviaciones estándar</b> por encima de la media histórica. Representa un crecimiento anómalo del <b style="color:var(--text-primary)">${v.toFixed(1)}%</b>, sugiriendo una alta probabilidad de fuga severa, hurto de energía o lectura defectuosa del medidor. Requiere revisión técnica inmediata en campo.`;
+    } else if (z > 2) {
+      interpretacion = `El consumo está <b style="color:var(--text-primary)">${z.toFixed(1)} desviaciones estándar</b> sobre el promedio. Un aumento del <b style="color:var(--text-primary)">${v.toFixed(1)}%</b> rompe la curva normal de esta categoría. Amerita un monitoreo preventivo o una auditoría telefónica con el cliente.`;
+    } else if (z < -2) {
+      interpretacion = `El consumo cae drásticamente. Ubicarse <b style="color:var(--text-primary)">${Math.abs(z).toFixed(1)} desviaciones estándar</b> por debajo del promedio (-${Math.abs(v).toFixed(1)}%) alerta fuertemente sobre un posible medidor averiado/trabado, local abandonado, o evasión intencional de registro.`;
+    } else {
+      interpretacion = `Estadísticamente estable. El consumo fluye predeciblemente dentro de la campana de Gauss (±2 std), coincidiendo perfectamente con el comportamiento histórico esperado para este tipo de usuario en su distrito.`;
+    }
+    
+    const interpBox = document.getElementById('simInterpretacionBox');
+    const interpText = document.getElementById('simInterpretacionText');
+    interpText.innerHTML = interpretacion;
+    interpBox.style.display = 'block';
+    
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo conectar con la API de predicción.');
+  } finally {
+    btn.innerHTML = '<span>Evaluar Riesgo</span> <span style="font-size:16px;">⚡</span>';
+    btn.style.opacity = '1';
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════

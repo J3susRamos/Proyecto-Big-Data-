@@ -11,6 +11,11 @@ import time
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+import sys
+
+# Ensure PySpark uses the exact same python executable to spawn workers
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 load_dotenv()
 from pyspark.sql import SparkSession, functions as F
@@ -659,7 +664,7 @@ def execute():
         print(f"  OE2 cumplido: {'SI' if oe2 else 'NO'}")
         print("=" * 60)
 
-        return spark, stats, kpis, ranking, tendencia, analisis, rfm, ranking
+        return stats, kpis, ranking, tendencia, analisis, rfm, oe2
 
     except Exception as e:
         print(f"\nERROR en execute: {e}")

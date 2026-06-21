@@ -149,7 +149,7 @@ def execute_batch():
 
     start_time = time.time()
     try:
-        statistics, kpis, ranking, trend, analysis, rfm, oe2 = spark_batch.ejecutar()
+        statistics, kpis, ranking, trend, analysis, rfm, oe2 = spark_batch.execute()
         success = statistics is not None
         duration = time.time() - start_time
 
@@ -246,7 +246,7 @@ def execute_serving():
 
     start_time = time.time()
     try:
-        success = serving.execute()
+        success = serving.ejecutar()
         duration = time.time() - start_time
         register_stage("serving", success, duration)
         return success
@@ -458,8 +458,8 @@ def main():
         print("Modo: SIMULADO (sin Kafka)")
     if kafka_mode:
         print("Modo: KAFKA REAL")
-    if max_rows:
-        print(f"Límite de datos: {max_rows:,} filas")
+    if max_records_per_file:
+        print(f"Límite de datos por archivo: {max_records_per_file:,} filas")
 
     pipeline_successful = True
     for stage in requested_stages:

@@ -85,30 +85,10 @@ def cargar_datos_batch():
     """
     try:
         # 1) CSV directo (escrito por spark_batch.py)
-        ruta_csv = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS.csv")
+        ruta_csv = os.path.join(RUTA_SERVING, "batch_results", "tmp_estadisticas_historicas.csv")
         if os.path.isfile(ruta_csv):
             df = pd.read_csv(ruta_csv, encoding="utf-8-sig")
             print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(df):,} filas [CSV]")
-            return df
-
-        # 2) Carpeta CSV generada por Spark (part-*.csv)
-        ruta_csv_dir = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS_csv")
-        if os.path.isdir(ruta_csv_dir):
-            archivos = glob.glob(os.path.join(ruta_csv_dir, "part-*.csv"))
-            if archivos:
-                df = pd.read_csv(archivos[0], encoding="utf-8-sig")
-                print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(df):,} filas [CSV dir]")
-                return df
-
-        # 3) Parquet con Spark
-        ruta_pq = os.path.join(RUTA_DATA, "TMP_ESTADISTICAS_HISTORICAS")
-        if os.path.isdir(ruta_pq):
-            from pyspark.sql import SparkSession
-            spark = SparkSession.builder.appName("Serving-Load-Batch").getOrCreate()
-            df_spark = spark.read.parquet(ruta_pq)
-            df = df_spark.toPandas()
-            spark.stop()
-            print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(df):,} filas [Parquet]")
             return df
 
         print("  No se encontraron datos batch.")
@@ -130,45 +110,23 @@ def cargar_datos_streaming():
     try:
         import pyarrow.parquet as pq
 
-        # 1) Parquet en serving_layer
-        ruta_pq_serving = os.path.join(RUTA_SERVING, "datos_streaming.parquet")
-        if os.path.isdir(ruta_pq_serving):
-            archivos = glob.glob(os.path.join(ruta_pq_serving, "*.parquet"))
-            if archivos:
-                tabla = pq.read_table(ruta_pq_serving)
-                df = tabla.to_pandas()
-                print(f"  Streaming (anomalias): {len(df):,} filas [Parquet serving]")
-                return df
-
-        # 2) Parquet en speed_layer/FACT_ANOMALIAS_STREAM
-        ruta_pq_speed = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
-        if os.path.isdir(ruta_pq_speed):
-            archivos = glob.glob(os.path.join(ruta_pq_speed, "*.parquet"))
-            if archivos:
-                dfs = []
-                for archivo in archivos:
-                    try:
-                        dfs.append(pq.read_table(archivo).to_pandas())
-                    except Exception:
-                        continue
-                if dfs:
-                    df = pd.concat(dfs, ignore_index=True)
-                    print(f"  Streaming (anomalias): {len(df):,} filas [Parquet speed]")
-                    return df
-
-        # 3) CSV en speed_layer
-        ruta_csv_speed = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
-        if os.path.isdir(ruta_csv_speed):
-            archivos = glob.glob(os.path.join(ruta_csv_speed, "part-*.csv"))
-            if archivos:
-                dfs = [pd.read_csv(a, encoding="utf-8-sig") for a in archivos]
-                df = pd.concat(dfs, ignore_index=True)
-                print(f"  Streaming (anomalias): {len(df):,} filas [CSV speed]")
-                return df
+        # 1) CSV en serving_layer (copiado por speed_layer)
+        ruta_csv_serving = os.path.join(RUTA_SERVING, "datos_streaming.csv")
+        if os.path.isfile(ruta_csv_serving):
+            df = pd.read_csv(ruta_csv_serving, encoding="utf-8-sig")
+            print(f"  Streaming (anomalias): {len(df):,} filas [CSV serving]")
+            return df
+            
+        # 2) CSV en root
+        ruta_csv_root = os.path.join(os.path.dirname(RUTA_SERVING), "FACT_ANOMALIAS_STREAM.csv")
+        if os.path.isfile(ruta_csv_root):
+            df = pd.read_csv(ruta_csv_root, encoding="utf-8-sig")
+            print(f"  Streaming (anomalias): {len(df):,} filas [CSV root]")
+            return df
 
         print("  No se encontraron datos streaming.")
-        print(f"  Buscado en: {ruta_pq_serving}")
-        print(f"  Buscado en: {ruta_pq_speed}")
+        print(f"  Buscado en: {ruta_csv_serving}")
+        print(f"  Buscado en: {ruta_csv_root}")
         return None
 
     except Exception as e:

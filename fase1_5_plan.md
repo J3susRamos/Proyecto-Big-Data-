@@ -1,8 +1,12 @@
 # FASE 1.5 - Análisis de Calidad de Datos (Variables Categóricas)
 
-**Fecha:** 2026-06-16  
+**Fecha:** 2026-06-16 (Actualizado: 2026-06-21 tras revisión de commits recientes)
 **Tipo:** Sub-fase intermedia entre Loader (Fase 1) y Batch (Fase 2)  
 **Propósito:** Validar integridad y completitud de variables categóricas  
+
+> [!NOTE]
+> **Revisión de Cambios Recientes (21-Jun-2026):**
+> Se verificó que las optimizaciones introducidas recientemente en el pipeline (`main.py`, `loader.py`, `spark_batch.py`) por el equipo **no afectan** los scripts ni los resultados del análisis exploratorio de esta Fase 1.5. Los hallazgos descritos a continuación se mantienen vigentes y válidos.
 
 ---
 

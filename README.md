@@ -140,6 +140,7 @@ docker-compose up --build
 ```
 
 Este comando:
+
 1. Construye la imagen Docker con Python 3.11 + Java 11 + PySpark 4.1.2
 2. Inicia Zookeeper (coordinación de Kafka)
 3. Inicia Kafka (broker de mensajes)
@@ -274,7 +275,6 @@ Cada archivo CSV debe tener las siguientes columnas (separadas por `;`):
 ## KPIs del Proyecto
 
 | KPI | Descripción | Métrica | Estado |
-|-----|-------------|---------|--------|
 | **OE1** | Calidad de datos en el loader | Tasa de validez >= 85% | ✅ / ❌ |
 | **OE2** | Estadísticas históricas completas | 10 columnas, consumo_promedio > 0 | ✅ / ❌ |
 | **OE3** | Latencia del speed layer | < 5 segundos | ✅ / ❌ |
@@ -337,6 +337,7 @@ sudo apt-get install openjdk-11-jdk-headless
 ### Error: `OutOfMemoryError: Java heap space`
 
 **Solución**: Aumentar la memoria asignada a Docker Desktop:
+
 1. Abrir Docker Desktop → Settings → Resources → Advanced
 2. Asignar al menos 6 GB de RAM
 3. Aplicar y reiniciar Docker
@@ -372,7 +373,6 @@ sudo chown -R $USER:$USER serving_layer/ data/
 El código original del proyecto usa rutas Windows (`r"C:\Users\Roxwell\..."`) y `localhost` para Kafka. Para funcionar dentro de contenedores Docker, el código lee las variables de entorno definidas en `docker-compose.yml`:
 
 | Variable | Valor en Docker | Propósito |
-|----------|----------------|-----------|
 | `RUTA_PROYECTO` | `/app` | Directorio raíz dentro del contenedor |
 | `RUTA_DATA` | `/app/data` | Datos de entrada/salida |
 | `RUTA_SERVING` | `/app/output` | Resultados finales |

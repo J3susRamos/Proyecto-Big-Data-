@@ -41,22 +41,21 @@ python -c "import pyspark; print(f'PySpark {pyspark.__version__} OK')"
 python -c "import pandas; print(f'Pandas {pandas.__version__} OK')"
 ```
 
-### 3. **Crear función `ejecutar()` en spark_batch.py:**
+### 3. **Verificar función `execute()` en spark_batch.py:**
 Debe retornar: `(statistics, kpis, ranking, trend, analysis, rfm, oe2)`
 
 ---
 
-## 🔴 PROBLEMAS IDENTIFICADOS EN spark_batch.py
+## 🟢 PROBLEMAS SOLUCIONADOS EN spark_batch.py
 
-1. **FALTA función `ejecutar()`** - main.py intenta llamarla
-   - Solución: Crear función que orquesta todas las operaciones batch
+1. **SE AGREGÓ función `execute()`** - main.py la llama correctamente.
+   - Solución: Jesús Ramos implementó la función que orquesta todas las operaciones batch.
 
-2. **NO crea directorio batch_results**
-   - Puede fallar al escribir Parquet si directorio no existe
+2. **CREA directorio batch_results**
+   - Solucionado: Se agregó `os.makedirs(output_dir, exist_ok=True)`.
 
-3. **Rutas Parquet inconsistentes**
-   - Algunos usan minúsculas, otros mayúsculas
-   - Estandarizar a: `tmp_estadisticas_historicas` (minúsculas)
+3. **Rutas Parquet estandarizadas**
+   - Solucionado: Se estandarizó a `tmp_estadisticas_historicas` en la nueva versión.
 
 ---
 
@@ -82,8 +81,8 @@ Columnas esperadas:
 
 ## 🛠️ PRÓXIMOS PASOS
 
-1. Corregir spark_batch.py para agregar función `ejecutar()`
-2. Verificar creación de directorios
+1. Corregir cualquier bug restante en spark_batch.py (si hubiera)
+2. Verificar creación de directorios (ya implementado)
 3. Ejecutar: `python main.py --etapa batch`
 4. Validar outputs en `serving_layer/batch_results/`
 5. Verificar que OE2 se cumple
