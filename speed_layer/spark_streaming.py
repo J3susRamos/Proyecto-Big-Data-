@@ -65,6 +65,8 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
         SparkSession: Sesion de Spark configurada.
     """
     try:
+        import sys
+        
         # Configurar HADOOP_HOME para Windows (winutils.exe necesario para Parquet)
         if os.name == "nt":  # Windows
             hadoop_home = "C:\\hadoop"

@@ -8,11 +8,13 @@ Genera graficos para identificar valores atipicos y calidad del dato.
 import os
 import glob
 import warnings
+import json
 import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 
 warnings.filterwarnings("ignore")
 
@@ -74,6 +76,169 @@ def analizar(df):
         print(f"  {col}: {outliers:,} outliers ({outliers/len(df)*100:.2f}%)")
 
     return df
+
+
+def analizar_categoricas(df):
+    """
+    Analiza variables categoricas para detectar:
+    - Valores nulos/vacios
+    - Categorias raras (< 10 registros)
+    - Inconsistencias (espacios, mayusculas)
+    - Distribucion desbalanceada
+    """
+    print("\n=== ANALISIS DE VARIABLES CATEGORICAS ===")
+    
+    # Identificar columnas categoricas
+    cols_cat = df.select_dtypes(include=['object']).columns.tolist()
+    
+    # Excluir campos de fecha/texto muy largos
+    cols_cat = [col for col in cols_cat if col not in 
+                ['FECHA_EMISION', 'FECHA_VENCIMIENTO', 'FECHA_CONSUMO_DESDE', 
+                 'FECHA_CONSUMO_HASTA', 'NRO_DOC_FAC']]
+    
+    stats_categoricas = {}
+    
+    for col in cols_cat:
+        print(f"\n{col}:")
+        
+        # Nulos
+        nulos = df[col].isnull().sum()
+        blancos = (df[col].fillna("").str.strip() == "").sum()
+        print(f"  Nulos: {nulos:,} | Blancos: {blancos:,}")
+        
+        # Únicos
+        unicos = df[col].nunique()
+        print(f"  Valores únicos: {unicos}")
+        
+        # Top 10
+        top10 = df[col].value_counts().head(10)
+        for val, count in top10.items():
+            pct = count / len(df) * 100
+            print(f"    - {val}: {count:,} ({pct:.2f}%)")
+        
+        # Categorias raras (< 10 registros)
+        raras = df[col].value_counts()
+        raras_count = (raras < 10).sum()
+        if raras_count > 0:
+            print(f"  ⚠️  Categorias raras (n < 10): {raras_count}")
+            for val, count in raras[raras < 10].items():
+                print(f"      - {val}: {count}")
+        
+        # Detectar inconsistencias de espacios
+        vals_unicos = df[col].unique()
+        vals_sin_espacios = set(str(v).strip() for v in vals_unicos if pd.notna(v))
+        if len(vals_sin_espacios) < unicos:
+            print(f"  ⚠️  Posibles inconsistencias de espacios detectadas")
+        
+        stats_categoricas[col] = {
+            "nulos": int(nulos),
+            "blancos": int(blancos),
+            "unicos": int(unicos),
+            "raras": int(raras_count)
+        }
+    
+    return stats_categoricas
+
+
+def generar_graficos_categoricas(df):
+    """
+    Genera graficos para analizar distribuciones categoricas.
+    """
+    # Identificar columnas categoricas principales
+    cols_cat = ['DEPARTAMENTO', 'PROVINCIA', 'DISTRITO', 'TARIFA', 'CARTERA', 'UNIDAD_NEGOCIO']
+    cols_cat = [col for col in cols_cat if col in df.columns]
+    
+    if not cols_cat:
+        print("No hay columnas categoricas para graficar")
+        return
+    
+    # Crear figura con subplots para cada categorica
+    n_cols = min(len(cols_cat), 3)
+    n_rows = (len(cols_cat) + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5 * n_rows))
+    
+    if n_rows == 1 and n_cols == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1 or n_cols == 1:
+        axes = axes.reshape(n_rows, n_cols)
+    
+    fig.suptitle("Analisis de Variables Categoricas - Hidrandina", 
+                 fontsize=16, fontweight="bold")
+    
+    for idx, col in enumerate(cols_cat):
+        ax = axes.flatten()[idx]
+        
+        # Top 15 valores
+        top_vals = df[col].value_counts().head(15)
+        colors = plt.cm.Set3(np.linspace(0, 1, len(top_vals)))
+        
+        bars = ax.barh(range(len(top_vals)), top_vals.values, color=colors, edgecolor="black", alpha=0.8)
+        ax.set_yticks(range(len(top_vals)))
+        ax.set_yticklabels(top_vals.index, fontsize=9)
+        ax.set_xlabel("Frecuencia", fontsize=10)
+        ax.set_title(f"{col} (Top 15)\n{df[col].nunique()} valores únicos", fontsize=11, fontweight="bold")
+        ax.grid(alpha=0.3, axis="x")
+        
+        # Anotaciones de porcentaje
+        for i, (bar, val) in enumerate(zip(bars, top_vals.values)):
+            pct = val / len(df) * 100
+            ax.text(val, i, f" {pct:.1f}%", va="center", fontsize=8)
+    
+    # Eliminar subplots vacíos
+    for idx in range(len(cols_cat), len(axes.flatten())):
+        fig.delaxes(axes.flatten()[idx])
+    
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    ruta_cat = os.path.join(os.path.dirname(__file__), "analisis_categoricas.png")
+    plt.savefig(ruta_cat, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"\nGrafico categoricas guardado: {ruta_cat}")
+
+
+def generar_matriz_frecuencias(df):
+    """
+    Genera matriz de frecuencias entre TARIFA y CARTERA.
+    """
+    if 'TARIFA' in df.columns and 'CARTERA' in df.columns:
+        print("\n=== MATRIZ TARIFA × CARTERA ===")
+        
+        matriz = pd.crosstab(df['TARIFA'], df['CARTERA'], margins=True)
+        print(matriz)
+        
+        # Gráfico de heatmap
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Matriz sin márgenes para el heatmap
+        matriz_sin_margenes = pd.crosstab(df['TARIFA'], df['CARTERA'])
+        im = ax.imshow(matriz_sin_margenes.values, cmap='YlOrRd', aspect='auto')
+        
+        ax.set_xticks(range(len(matriz_sin_margenes.columns)))
+        ax.set_yticks(range(len(matriz_sin_margenes.index)))
+        ax.set_xticklabels(matriz_sin_margenes.columns, rotation=45, ha='right')
+        ax.set_yticklabels(matriz_sin_margenes.index)
+        ax.set_xlabel('CARTERA', fontsize=12, fontweight='bold')
+        ax.set_ylabel('TARIFA', fontsize=12, fontweight='bold')
+        ax.set_title('Matriz de Frecuencias: TARIFA × CARTERA', fontsize=14, fontweight='bold')
+        
+        # Anotaciones
+        for i in range(len(matriz_sin_margenes.index)):
+            for j in range(len(matriz_sin_margenes.columns)):
+                val = matriz_sin_margenes.iloc[i, j]
+                text = ax.text(j, i, f'{int(val):,}', ha='center', va='center', 
+                             color='white' if val > matriz_sin_margenes.values.max() / 2 else 'black',
+                             fontsize=9, fontweight='bold')
+        
+        plt.colorbar(im, ax=ax, label='Cantidad de Registros')
+        plt.tight_layout()
+        
+        ruta_matriz = os.path.join(os.path.dirname(__file__), "analisis_matriz_tarifa_cartera.png")
+        plt.savefig(ruta_matriz, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"\nMatriz guardada: {ruta_matriz}")
+        
+        return matriz
+    
+    return None
 
 
 def generar_graficos(df):
@@ -153,15 +318,38 @@ def generar_graficos(df):
 
 def ejecutar():
     print("=" * 60)
-    print("ANALISIS EXPLORATORIO - Hidrandina")
+    print("ANALISIS EXPLORATORIO - Hidrandina (FASE 1.5)")
     print("=" * 60)
     df = cargar_muestra(RUTA_CSV)
     if df.empty:
         print("No hay datos.")
         return
+    
+    # Análisis numéricos (Fase 1 existente)
+    print("\n📊 FASE 1: ANALISIS NUMERICO")
     df = analizar(df)
     generar_graficos(df)
-    print("\nAnalisis completado. Revisa el grafico generado.")
+    
+    # Análisis categóricos (NUEVO - Fase 1.5)
+    print("\n📊 FASE 1.5: ANALISIS CATEGORICO")
+    stats_cat = analizar_categoricas(df)
+    generar_graficos_categoricas(df)
+    matriz = generar_matriz_frecuencias(df)
+    
+    # Guardar reporte JSON
+    reporte = {
+        "fase": "1.5 - Calidad de Datos Categóricos",
+        "registros_analizados": len(df),
+        "variables_categoricas": stats_cat,
+        "matriz_tarifa_cartera": matriz.to_dict() if matriz is not None else None
+    }
+    
+    ruta_reporte = os.path.join(os.path.dirname(__file__), "reporte_fase1_5.json")
+    with open(ruta_reporte, 'w', encoding='utf-8') as f:
+        json.dump(reporte, f, indent=2, ensure_ascii=False)
+    
+    print(f"\n✅ Reporte guardado: {ruta_reporte}")
+    print("\nAnalisis completado. Revisa los graficos generados.")
 
 
 if __name__ == "__main__":

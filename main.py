@@ -149,7 +149,7 @@ def execute_batch():
 
     start_time = time.time()
     try:
-        spark, statistics, kpis, ranking, trend, analysis, rfm, dept_kpis = spark_batch.execute()
+        statistics, kpis, ranking, trend, analysis, rfm, oe2 = spark_batch.ejecutar()
         success = statistics is not None
         duration = time.time() - start_time
 
@@ -406,6 +406,10 @@ def main():
             print("  producer   - Publica eventos a Kafka")
             print("  streaming  - Consume y clasifica anomalias")
             print("  serving    - Genera outputs finales")
+            print("\nEjemplos:")
+            print("  python main.py --etapa loader --max-rows 100000")
+            print("  python main.py --simulado")
+            print("  python main.py --max-rows 1000000 --etapa loader --etapa batch")
             return
         else:
             print(f"Argumento desconocido: {args[i]}")
@@ -454,6 +458,8 @@ def main():
         print("Modo: SIMULADO (sin Kafka)")
     if kafka_mode:
         print("Modo: KAFKA REAL")
+    if max_rows:
+        print(f"Límite de datos: {max_rows:,} filas")
 
     pipeline_successful = True
     for stage in requested_stages:
