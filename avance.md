@@ -18,39 +18,39 @@ Se inicia la ejecución del plan de implementación completo (5 fases) para el p
 
 ## ⚙️ Configuración de Límite de Datos
 
-### Parámetro agregado: `--max-rows`
+### Parámetro agregado: `--max-records-per-file`
 
 Se han modificado los siguientes archivos para permitir limitar la cantidad de registros cargados:
 
 #### **1. `utils/loader.py`**
-- ✅ Modificada función `cargar_todos_los_csv(ruta=None, max_rows=None)`
+- ✅ Modificada función `load_all_csvs(path=None, max_records_per_file=None)`
 - ✅ Añadido contador de filas acumuladas
-- ✅ Detiene la carga cuando alcanza `max_rows`
-- ✅ Modificada función `ejecutar(max_rows=None)`
+- ✅ Detiene la carga cuando alcanza `max_records_per_file`
+- ✅ Modificada función `execute(max_records_per_file=None)`
 
 #### **2. `main.py`**
-- ✅ Modificada función `execute_loader(max_rows=None)`
-- ✅ Parseador de argumentos: `--max-rows NUMERO`
+- ✅ Modificada función `execute_loader(max_records_per_file=None)`
+- ✅ Parseador de argumentos: `--max-records-per-file NUMERO`
 - ✅ Documentación en `--help` actualizada
 - ✅ Mapa de etapas actualizado
 
 ### Uso desde línea de comandos
 
 ```bash
-# Ejecutar Fase 1 con límite de 500,000 filas
-python main.py --etapa loader --max-rows 500000
+# Ejecutar Fase 1 con límite de 500,000 filas por archivo
+python main.py --etapa loader --max-records-per-file 500000
 
-# Ejecutar todas las fases con límite de 1,000,000 filas
-python main.py --max-rows 1000000
+# Ejecutar todas las fases con límite de 1,000,000 filas por archivo
+python main.py --max-records-per-file 1000000
 
 # Modo simulado con límite (sin Kafka)
-python main.py --simulado --max-rows 500000
+python main.py --simulado --max-records-per-file 500000
 
 # Ver ayuda completa
 python main.py --help
 ```
 
-### Valores recomendados de `max_rows`
+### Valores recomendados de `max_records_per_file`
 
 | Valor | Tiempo estimado | Uso |
 |-------|-----------------|-----|
@@ -71,7 +71,7 @@ python main.py --help
 
 **Comando:**
 ```bash
-python main.py --etapa loader --max-rows 500000
+python main.py --etapa loader --max-records-per-file 500000
 ```
 
 ---
@@ -84,7 +84,7 @@ python main.py --etapa loader --max-rows 500000
 
 **Comando:**
 ```bash
-python main.py --etapa batch --max-rows 500000
+python main.py --etapa batch --max-records-per-file 500000
 ```
 
 ---
@@ -100,7 +100,7 @@ python main.py --etapa batch --max-rows 500000
 
 **Comando (modo simulado):**
 ```bash
-python main.py --etapa producer --etapa streaming --simulado --max-rows 500000
+python main.py --etapa producer --etapa streaming --simulado --max-records-per-file 500000
 ```
 
 ---
@@ -159,29 +159,21 @@ python serve_dashboard.py
 
 ### Modificación 1: `utils/loader.py`
 ```python
-# Antes
-def cargar_todos_los_csv(ruta=None):
-    ...
-
-# Después
-def cargar_todos_los_csv(ruta=None, max_rows=None):
+# Refactorizado (por Jesús Ramos)
+def load_all_csvs(path=None, max_records_per_file=None):
     # Ahora soporta límite de filas
-    # - Cuenta filas acumuladas
-    # - Detiene lectura cuando alcanza max_rows
+    # - Usa variables de entorno o parámetro directo
+    # - Detiene lectura cuando alcanza max_records_per_file
 ```
 
 ### Modificación 2: `main.py`
 ```python
-# Antes
-def execute_loader():
-    fact, dim, metrics = loader.execute()
-
-# Después  
-def execute_loader(max_rows=None):
-    fact, dim, metrics = loader.ejecutar(max_rows=max_rows)
+# Refactorizado (por Jesús Ramos)
+def execute_loader(max_records_per_file=None):
+    fact, dim, metrics = loader.execute(max_records_per_file=max_records_per_file)
 
 # Nuevo parseador de argumentos
---max-rows NUMERO
+--max-records-per-file NUMERO
 ```
 
 ---
@@ -202,7 +194,7 @@ def execute_loader(max_rows=None):
 ## 📝 Notas
 
 - Los datos se limitan para desarrollo rápido
-- En producción, se puede omitir `--max-rows` para procesar todos los ~30M registros
+- En producción, se puede omitir `--max-records-per-file` para procesar todos los ~30M registros
 - El modo `--simulado` no requiere Apache Kafka (usa JSON)
 - Se mantiene total compatibilidad con el pipeline completo
 
