@@ -12,7 +12,8 @@ data/**/*.xlsx
 !data/originales/.gitkeep
 
 # ── Resultados generados ─────────────────────────────────────────────────
-serving_layer/batch_results/
+# batch_results/ se sube a git: son resultados ya procesados (~5MB) que
+# evitan a los companeros re-ejecutar el batch layer completo (~22 min).
 serving_layer/stream_results/
 serving_layer/*.csv
 serving_layer/*.png

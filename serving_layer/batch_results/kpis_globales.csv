@@ -1,0 +1,9 @@
+﻿indicador,valor
+facturacion_total_soles,3395567991.3
+consumo_total_kwh,3786813434.53
+total_facturas,27304677.0
+ticket_promedio,124.36
+consumo_promedio_global,138.69
+total_registros,27304677.0
+registros_outliers,50692.0
+tasa_outlier_pct,0.19

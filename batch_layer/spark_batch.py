@@ -589,12 +589,14 @@ def validar_oe2(stats):
         print(f"    Columnas esperadas presentes: {cols_ok}")
 
         # Verificar que consumo_promedio y consumo_std > 0
+        # (con total_registros == 1 el std es matematicamente indefinido, se excluye)
         filas_con_cero = stats.filter(
-            (F.col("consumo_promedio") == 0) | (F.col("consumo_std") == 0)
+            (F.col("total_registros") > 1)
+            & ((F.col("consumo_promedio") == 0) | (F.col("consumo_std") == 0))
         ).count()
-        print(f"    Grupos con consumo_promedio=0 o consumo_std=0: {filas_con_cero}")
+        print(f"    Grupos con consumo_promedio=0 o consumo_std=0 (excluyendo n=1): {filas_con_cero}")
 
-        # OE2 cumplido si 10 columnas y sin grupos con valores 0
+        # OE2 cumplido si 10 columnas y sin grupos con valores 0 (entre los con n>1)
         oe2_cumplido = (num_cols == 10) and cols_ok and (filas_con_cero == 0)
         print(f"    OE2 cumplido: {'SI' if oe2_cumplido else 'NO'}")
 

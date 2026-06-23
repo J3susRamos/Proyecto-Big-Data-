@@ -87,6 +87,8 @@ Significa que hemos logrado resumir todo el historial gigante de una zona en una
 ### 6. ¿Cómo sabemos si el resultado es bueno?
 Sabemos que es exitoso si nuestro programa no colapsa por la cantidad de datos, y si el **OE2** da luz verde generando resultados matemáticamente coherentes.
 
+**Nota sobre OE2 con el dataset completo (27.3M registros):** al agrupar por DISTRITO+TARIFA+CARTERA se generan 1,839 grupos, y 268 de ellos quedaban con `consumo_std = 0`. Al investigar, 224 eran grupos con un solo registro (el std muestral es matemáticamente indefinido con n=1, Spark devuelve NULL y se rellena con 0 — esto se corrigió excluyendo n=1 de la validación). Los 44 restantes son grupos con varios clientes que consumen exactamente la misma cantidad (consumo realmente constante, no un error de cálculo). Por eso OE2 queda en "NO" con datos reales: no es un fallo del pipeline, sino una característica esperada en distritos rurales con pocos clientes homogéneos.
+
 ### 7. ¿Cuál es el resultado final? (La Salida)
 Generamos **6 archivos compactos CSV** con los resúmenes. El más importante es la tabla de "Estadísticas Históricas", que funcionará como nuestro gran "libro de reglas". Adicionalmente, graficamos los resultados.
 
