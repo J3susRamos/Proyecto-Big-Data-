@@ -25,6 +25,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
+import pyspark
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col, from_json, when, lit, current_timestamp, expr, struct,
@@ -39,16 +40,16 @@ from pyspark.sql.types import (
 )
 
 # ── Rutas ─────────────────────────────────────────────────────────────
-RUTA_DATA = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
-RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "..", "serving_layer"))
-RUTA_SPEED = os.environ.get("RUTA_SPEED", os.path.join(os.path.dirname(__file__), ".."))
+data_path = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
+serving_path = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "..", "serving_layer"))
+speed_path = os.environ.get("RUTA_SPEED", os.path.join(os.path.dirname(__file__), ".."))
 
 # ── Configuracion Kafka ───────────────────────────────────────────────
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get(
+kafka_bootstrap_servers = os.environ.get(
     "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"
 )
-KAFKA_TOPIC = "hidrandina-consumo"
-KAFKA_CHECKPOINT = os.path.join(
+kafka_topic = "hidrandina-consumo"
+kafka_checkpoint_path = os.path.join(
     os.environ.get("RUTA_PROYECTO", os.path.dirname(os.path.dirname(__file__))),
     "checkpoint", "streaming"
 )
@@ -65,16 +66,18 @@ def create_spark_session(app_name="Hidrandina-Speed-Layer"):
         SparkSession: Sesion de Spark configurada.
     """
     try:
-        if os.name == "nt":  # Windows
+        is_windows = os.name == "nt"
+        if is_windows:
             # PYSPARK_PYTHON explicito para evitar el stub de Microsoft Store
-            python_path = sys.executable
-            os.environ["PYSPARK_PYTHON"] = python_path
-            os.environ["PYSPARK_DRIVER_PYTHON"] = python_path
+            windows_python_path = sys.executable
+            os.environ["PYSPARK_PYTHON"] = windows_python_path
+            os.environ["PYSPARK_DRIVER_PYTHON"] = windows_python_path
 
         spark = (
             SparkSession.builder
             .master(os.environ.get("SPARK_MASTER", "local[*]"))
             .appName("Hidrandina_Streaming")
+            .config("spark.jars.packages", f"org.apache.spark:spark-sql-kafka-0-10_2.13:{pyspark.__version__}")
             .config("spark.sql.shuffle.partitions", "8")
             .config("spark.default.parallelism", "8")
             .config("spark.sql.session.timeZone", "America/Lima")
@@ -115,7 +118,7 @@ def read_historical_statistics(spark, path=None):
             # Buscar CSV directamente en batch_results (formato real)
             ruta_batch = os.environ.get(
                 "RUTA_BATCH_RESULTS",
-                os.path.join(RUTA_SERVING, "batch_results")
+                os.path.join(serving_path, "batch_results")
             )
             csv_path = os.path.join(ruta_batch, "tmp_estadisticas_historicas.csv")
             parquet_path = os.path.join(ruta_batch, "tmp_estadisticas_historicas")
@@ -137,19 +140,19 @@ def read_historical_statistics(spark, path=None):
 
         # Detectar formato por extension
         if path.endswith(".csv"):
-            df = (
+            statistics_df = (
                 spark.read
                 .option("header", "true")
                 .option("inferSchema", "true")
                 .csv(path)
             )
         else:
-            df = spark.read.parquet(path)
+            statistics_df = spark.read.parquet(path)
 
-        num_rows = df.count()
+        num_rows = statistics_df.count()
         print(f"TMP_ESTADISTICAS_HISTORICAS leido: {num_rows:,} filas")
-        print(f"  Columnas: {df.columns}")
-        return df
+        print(f"  Columnas: {statistics_df.columns}")
+        return statistics_df
     except Exception as e:
         print(f"ERROR leyendo estadisticas: {e}")
         return None
@@ -190,14 +193,14 @@ def read_kafka_stream(spark):
     """
     try:
         print(f"Configurando lectura Kafka:")
-        print(f"  Bootstrap: {KAFKA_BOOTSTRAP_SERVERS}")
-        print(f"  Topic: {KAFKA_TOPIC}")
+        print(f"  Bootstrap: {kafka_bootstrap_servers}")
+        print(f"  Topic: {kafka_topic}")
 
         df_kafka = (
             spark.readStream
             .format("kafka")
-            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
-            .option("subscribe", KAFKA_TOPIC)
+            .option("kafka.bootstrap.servers", kafka_bootstrap_servers)
+            .option("subscribe", kafka_topic)
             .option("startingOffsets", "earliest")
             .option("maxOffsetsPerTrigger", 50000)
             .option("failOnDataLoss", "false")
@@ -225,7 +228,7 @@ def read_simulated_stream(spark, path=None):
     """
     try:
         if path is None:
-            path = os.path.join(RUTA_DATA, "eventos_simples.json")
+            path = os.path.join(data_path, "eventos_simples.json")
 
         if not os.path.exists(path):
             print(f"ERROR: No se encuentra archivo simulado en {path}")
@@ -251,7 +254,7 @@ def read_simulated_stream(spark, path=None):
             rows.append(Row(
                 key=str(evt.get("NRO_DOC_FAC", "0")),
                 value=json.dumps(evt),
-                topic=KAFKA_TOPIC,
+                topic=kafka_topic,
                 partition=0,
                 offset=i,
                 timestamp=datetime.now()
@@ -261,7 +264,7 @@ def read_simulated_stream(spark, path=None):
             return None
 
         # Crear DataFrame estatico que simularemos como stream
-        df_estatico = spark.createDataFrame(rows)
+        static_df = spark.createDataFrame(rows)
 
         # Usar formato 'rate' para generar micro-batches y hacer join
         df_rate = spark.readStream.format("rate").option("rowsPerSecond", 500).load()
@@ -271,7 +274,7 @@ def read_simulated_stream(spark, path=None):
         df_rate_indexed = df_rate.withColumn("idx", monotonically_increasing_id())
 
         # Crear DataFrame estatico con indice
-        events_df = df_estatico.withColumn(
+        events_df = static_df.withColumn(
             "idx", monotonically_increasing_id()
         )
 
@@ -394,7 +397,8 @@ def enrich_events(df_events, statistics_df):
         if join_col == "NRO_DOC_FAC":
             dim_df = dim_df.withColumnRenamed("NRO_DOC_FAC", "NRO_DOC_FAC")
 
-        df_events_dim = df_events.join(dim_df.select(join_col, "DISTRITO", "TARIFA", "CARTERA"), on=join_col, how="left")
+        df_events_sin_ubicacion = df_events.drop("DISTRITO", "TARIFA", "CARTERA")
+        df_events_dim = df_events_sin_ubicacion.join(dim_df.select(join_col, "DISTRITO", "TARIFA", "CARTERA"), on=join_col, how="left")
 
         # 2. JOIN con estadisticas por DISTRITO, TARIFA y CARTERA (FIX 4 APLICADO)
         enriched_df = df_events_dim.join(
@@ -571,7 +575,7 @@ def save_streaming_output(anomalies_df, output_path=None, checkpoint_path=None):
     """
     try:
         if output_path is None:
-            output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
+            output_path = os.path.join(speed_path, "FACT_ANOMALIAS_STREAM")
 
         if checkpoint_path is None:
             checkpoint_path = os.path.join(
@@ -647,7 +651,7 @@ def calculate_region_hourly_accumulation(enriched_df):
         print(f"  Total grupos DISTRITO×hora: {rows:,}")
 
         # Guardar como JSON
-        output_path = os.path.join(RUTA_DATA, "region_hourly_accumulation.json")
+        output_path = os.path.join(data_path, "region_hourly_accumulation.json")
         local_rows = region_hourly_df.collect()
         records = [
             {
@@ -691,7 +695,7 @@ def process_stream_batch(enriched_df, epoch_id):
         anomalies_df = classify_anomalies(enriched_df)
 
         # Guardar batch individual
-        output_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM")
+        output_path = os.path.join(speed_path, "FACT_ANOMALIAS_STREAM")
         anomalies_df.write.mode("append").parquet(output_path)
         print(f"  Batch {epoch_id} guardado: {anomalies_df.count():,} registros")
         print(f"--- Fin micro-batch {epoch_id} ---\n")
@@ -702,6 +706,47 @@ def process_stream_batch(enriched_df, epoch_id):
 # =====================================================================
 # CAPA 3 — VENTANA DE AGREGACION POR HORA/REGION
 # =====================================================================
+
+def add_location_columns(df_events):
+    """
+    Anade DEPARTAMENTO y DISTRITO a los eventos crudos uniendo con
+    DIM_CLIENTE_UBICACION por NRO_DOC_FAC.
+
+    El evento de Kafka solo trae las columnas de FACT_CONSUMO (no tiene
+    DEPARTAMENTO/DISTRITO), asi que create_region_hourly_alerts necesita
+    este join para poder agrupar y mostrar la ubicacion real en las
+    alertas, en vez de columnas vacias.
+
+    Parametros:
+        df_events (DataFrame): Eventos parseados desde Kafka.
+
+    Retorna:
+        DataFrame: df_events con DEPARTAMENTO y DISTRITO anadidos.
+    """
+    try:
+        dim_path = os.path.join(data_path, "DIM_CLIENTE_UBICACION.csv")
+        location_schema = StructType([
+            StructField("NRO_DOC_FAC", StringType(), True),
+            StructField("DEPARTAMENTO", StringType(), True),
+            StructField("PROVINCIA", StringType(), True),
+            StructField("DISTRITO", StringType(), True),
+            StructField("UBIGEO", StringType(), True),
+            StructField("TARIFA", StringType(), True),
+            StructField("CARTERA", StringType(), True),
+            StructField("UNIDAD_NEGOCIO", StringType(), True),
+        ])
+        dim_df = (
+            df_events.sparkSession.read
+            .option("header", "true")
+            .schema(location_schema)
+            .csv(dim_path)
+            .select("NRO_DOC_FAC", "DEPARTAMENTO", "DISTRITO")
+        )
+        return df_events.drop("DEPARTAMENTO", "DISTRITO").join(dim_df, on="NRO_DOC_FAC", how="left")
+    except Exception as e:
+        print(f"ERROR en add_location_columns: {e}")
+        return df_events
+
 
 def create_region_hourly_alerts(enriched_df):
     """
@@ -770,7 +815,7 @@ def write_alerts_to_kafka(alertas_df):
         StreamingQuery: Consulta de streaming.
     """
     try:
-        checkpoint_path = KAFKA_CHECKPOINT + "_alertas"
+        checkpoint_path = kafka_checkpoint_path + "_alertas"
         os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
 
         query = (
@@ -781,7 +826,7 @@ def write_alerts_to_kafka(alertas_df):
             )
             .writeStream
             .format("kafka")
-            .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
+            .option("kafka.bootstrap.servers", kafka_bootstrap_servers)
             .option("topic", "hidrandina-alertas")
             .option("checkpointLocation", checkpoint_path)
             .trigger(processingTime="10 seconds")
@@ -796,6 +841,62 @@ def write_alerts_to_kafka(alertas_df):
         return None
 
 
+def write_alerts_to_json(alertas_df):
+    """
+    Escribe cada micro-batch de alertas a region_hourly_alerts.json para
+    que el dashboard (serve_dashboard.py) las consuma via REST, sin
+    necesidad de un consumidor Kafka propio.
+
+    Mantiene como maximo las ultimas 200 alertas, deduplicando por
+    (window_start, DISTRITO) para que una misma ventana horaria no se
+    repita si llega en mas de un micro-batch.
+
+    Parametros:
+        alertas_df (DataFrame): Stream de alertas generado por
+            create_region_hourly_alerts.
+
+    Retorna:
+        StreamingQuery: Consulta de streaming, o None si falla.
+    """
+    try:
+        alerts_json_path = os.path.join(data_path, "region_hourly_alerts.json")
+
+        def write_batch(batch_df, batch_id):
+            new_rows = [row.asDict() for row in batch_df.collect()]
+            if not new_rows:
+                return
+            try:
+                existing_rows = []
+                if os.path.exists(alerts_json_path):
+                    with open(alerts_json_path, "r", encoding="utf-8") as f:
+                        existing_rows = json.load(f)
+
+                deduped_by_key = {}
+                for row in existing_rows + new_rows:
+                    key = (str(row.get("window_start")), row.get("DISTRITO"))
+                    deduped_by_key[key] = row
+                final_rows = list(deduped_by_key.values())[-200:]
+
+                with open(alerts_json_path, "w", encoding="utf-8") as f:
+                    json.dump(final_rows, f, indent=2, ensure_ascii=False, default=str)
+            except Exception as e:
+                print(f"  ERROR escribiendo region_hourly_alerts.json: {e}")
+
+        query = (
+            alertas_df.writeStream
+            .foreachBatch(write_batch)
+            .outputMode("update")
+            .trigger(processingTime="10 seconds")
+            .start()
+        )
+
+        print(f"Alertas en JSON activadas: {alerts_json_path}")
+        return query
+    except Exception as e:
+        print(f"ERROR en write_alerts_to_json: {e}")
+        return None
+
+
 def kafka_streaming_mode(spark, statistics_df):
     """
     Ejecuta el pipeline en modo streaming real con Kafka.
@@ -806,7 +907,7 @@ def kafka_streaming_mode(spark, statistics_df):
     """
     df_kafka = read_kafka_stream(spark)
     if df_kafka is None:
-        return False
+        return False, None
 
     schema = define_event_schema()
     df_events = parse_event(df_kafka, schema)
@@ -816,31 +917,56 @@ def kafka_streaming_mode(spark, statistics_df):
     query_anomalias = save_streaming_output(enriched_df)
     if query_anomalias is None:
         print("ERROR: No se pudo iniciar la consulta de anomalias.")
-        return False
+        return False, None
 
     # Query 2: Alertas por ventana horaria (Capa 3)
     print("\nIniciando agregacion por ventana horaria...")
     # Pasar df_events (que tiene kafka_timestamp) para alertas por ventana horaria
-    alertas_df = create_region_hourly_alerts(df_events)
+    df_events_with_location = add_location_columns(df_events)
+    alertas_df = create_region_hourly_alerts(df_events_with_location)
     query_alertas = write_alerts_to_kafka(alertas_df)
     if query_alertas is None:
-        print("  ADVERTENCIA: No se pudo iniciar alertas.")
+        print("  ADVERTENCIA: No se pudo iniciar alertas hacia Kafka.")
 
-        print("\nStreaming iniciado. Procesando datos de Kafka...")
+    query_alertas_json = write_alerts_to_json(alertas_df)
+    if query_alertas_json is None:
+        print("  ADVERTENCIA: No se pudo iniciar alertas hacia JSON (dashboard).")
+
+    print("\nStreaming iniciado. Procesando datos de Kafka...")
     print("  Timeout: 300s (5 minutos)")
     print("  Presione Ctrl+C para detener antes.")
 
+    avg_batch_latency_seg = None
     try:
         # Esperar a que termine la query principal (anomalias)
         query_anomalias.awaitTermination(timeout=300)
     except KeyboardInterrupt:
         print("\nStreaming detenido por el usuario.")
     finally:
+        # Latencia real de procesamiento: promedio de "triggerExecution"
+        # (duracion de cada micro-batch) reportado por Spark, no el tiempo
+        # total que awaitTermination estuvo bloqueado esperando el timeout.
+        try:
+            progresos = query_anomalias.recentProgress
+            duraciones_ms = [
+                p.durationMs.get("triggerExecution")
+                for p in progresos
+                if p.durationMs and p.durationMs.get("triggerExecution") is not None
+            ]
+            if duraciones_ms:
+                avg_batch_latency_seg = (sum(duraciones_ms) / len(duraciones_ms)) / 1000.0
+                print(f"  Micro-batches procesados: {len(duraciones_ms)}")
+                print(f"  Latencia promedio por micro-batch: {avg_batch_latency_seg:.3f} seg")
+        except Exception as e:
+            print(f"  ADVERTENCIA: no se pudo calcular latencia real de micro-batch: {e}")
+
         query_anomalias.stop()
         if query_alertas is not None:
             query_alertas.stop()
+        if query_alertas_json is not None:
+            query_alertas_json.stop()
 
-    return True
+    return True, avg_batch_latency_seg
 
 
 def simulated_streaming_mode(spark, statistics_df):
@@ -859,9 +985,9 @@ def simulated_streaming_mode(spark, statistics_df):
     """
     print("\n=== MODO SIMULADO (sin Kafka) ===")
 
-    events_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+    events_path = os.path.join(data_path, "eventos_simples.json")
     if not os.path.exists(events_path):
-        events_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+        events_path = os.path.join(data_path, "eventos_simples.json")
         if not os.path.exists(events_path):
             print(f"ERROR: No hay eventos simulados en {events_path}")
             print("  Ejecute primero: python speed_layer/kafka_producer.py simulado")
@@ -938,14 +1064,14 @@ def simulated_streaming_mode(spark, statistics_df):
         pdf = final_df.toPandas()
         
         # 1. Carpeta Speed Layer
-        os.makedirs(RUTA_SPEED, exist_ok=True)
-        csv_path = os.path.join(RUTA_SPEED, "FACT_ANOMALIAS_STREAM.csv")
+        os.makedirs(speed_path, exist_ok=True)
+        csv_path = os.path.join(speed_path, "FACT_ANOMALIAS_STREAM.csv")
         pdf.to_csv(csv_path, index=False, encoding="utf-8-sig")
         print(f"Resultados CSV guardados en: {csv_path}")
 
         # 2. Copiar a Serving Layer
-        os.makedirs(RUTA_SERVING, exist_ok=True)
-        serving_csv_path = os.path.join(RUTA_SERVING, "datos_streaming.csv")
+        os.makedirs(serving_path, exist_ok=True)
+        serving_csv_path = os.path.join(serving_path, "datos_streaming.csv")
         pdf.to_csv(serving_csv_path, index=False, encoding="utf-8-sig")
         print(f"Datos copiados a serving layer: {serving_csv_path}")
 
@@ -983,7 +1109,7 @@ def simulated_streaming_mode(spark, statistics_df):
         return False
 
 
-def validate_latency(start_time, end_time, precision_pct=None):
+def validate_latency(start_time, end_time, precision_pct=None, real_latency_seg=None):
     """
     Valida KPI OE3: latencia < 5 segundos y precision >= 90%.
 
@@ -991,12 +1117,16 @@ def validate_latency(start_time, end_time, precision_pct=None):
         start_time (float): Tiempo de inicio (time.time()).
         end_time (float): Tiempo de fin (time.time()).
         precision_pct (float): Precision calculada (opcional).
+        real_latency_seg (float): Latencia real de procesamiento por
+            micro-batch (promedio de "triggerExecution" reportado por Spark).
+            Si se provee, se usa en vez de (end_time - start_time), que solo
+            mide cuanto tiempo estuvo bloqueado el awaitTermination.
 
     Retorna:
         dict: Metricas de latency.
     """
     try:
-        latency = end_time - start_time
+        latency = real_latency_seg if real_latency_seg is not None else (end_time - start_time)
         metrics = {
             "latencia_segundos": round(latency, 3),
             "oe3_latencia_cumplido": latency < 5,
@@ -1025,8 +1155,8 @@ def save_report(metrics):
         metrics (dict): Metricas a guardar.
     """
     try:
-        os.makedirs(RUTA_SPEED, exist_ok=True)
-        path = os.path.join(RUTA_SPEED, "reporte_streaming.json")
+        os.makedirs(speed_path, exist_ok=True)
+        path = os.path.join(speed_path, "reporte_streaming.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(metrics, f, indent=2, ensure_ascii=False)
         print(f"  Reporte streaming guardado: {path}")
@@ -1067,22 +1197,25 @@ def execute(mode="auto"):
         statistics_df.cache()
         statistics_df.count()
 
+        real_latency_seg = None
         if mode == "real":
-            result = kafka_streaming_mode(spark, statistics_df)
+            result, real_latency_seg = kafka_streaming_mode(spark, statistics_df)
         elif mode == "simulado":
             result = simulated_streaming_mode(spark, statistics_df)
         else:
             # auto: intentar Kafka, fallback a simulado
-            sim_path = os.path.join(RUTA_DATA, "eventos_simples.json")
+            sim_path = os.path.join(data_path, "eventos_simples.json")
             if os.path.exists(sim_path):
                 print("Usando modo simulado (eventos JSON encontrados)")
                 result = simulated_streaming_mode(spark, statistics_df)
             else:
                 print("Intentando modo real (Kafka)...")
-                result = kafka_streaming_mode(spark, statistics_df)
+                result, real_latency_seg = kafka_streaming_mode(spark, statistics_df)
 
         end_time_total = time.time()
-        latency_metrics = validate_latency(start_time_total, end_time_total)
+        latency_metrics = validate_latency(
+            start_time_total, end_time_total, real_latency_seg=real_latency_seg
+        )
         save_report(latency_metrics)
 
         print("\n" + "=" * 60)

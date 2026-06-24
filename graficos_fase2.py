@@ -10,10 +10,11 @@ def generar_graficos():
     batch_dir = os.path.join("serving_layer", "batch_results")
     
     # 1. Gráfico de Segmentación RFM
-    rfm_path = os.path.join(batch_dir, "rfm_clientes.csv")
-    if os.path.exists(rfm_path):
+    rfm_csv_path = os.path.join(batch_dir, "rfm_clientes.csv")
+    rfm_parquet_path = os.path.join(batch_dir, "rfm_clientes")
+    if os.path.exists(rfm_csv_path) or os.path.isdir(rfm_parquet_path):
         print("Cargando datos de RFM...")
-        df_rfm = pd.read_csv(rfm_path)
+        df_rfm = pd.read_csv(rfm_csv_path) if os.path.exists(rfm_csv_path) else pd.read_parquet(rfm_parquet_path)
         
         # Contar cuántos clientes hay en cada segmento
         segment_counts = df_rfm['segmento'].value_counts()
@@ -35,7 +36,7 @@ def generar_graficos():
         plt.savefig('analisis_rfm_fase2.png', dpi=300)
         print("[OK] Grafico guardado: analisis_rfm_fase2.png")
     else:
-        print(f"[X] No se encontro: {rfm_path}")
+        print(f"[X] No se encontro: {rfm_csv_path} ni {rfm_parquet_path}")
 
     # 2. Gráfico de Tendencias Históricas
     trend_path = os.path.join(batch_dir, "tendencia_mensual.csv")

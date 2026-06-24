@@ -2,14 +2,14 @@
 loader.py — Carga, limpieza y separación del dataset Hidrandina
 
 Funciones principales:
-    - detectar_separador: Detecta automáticamente el separador del CSV
-    - cargar_todos_los_csv: Lee y combina todos los CSV mensuales
+    - detect_separator: Detecta automáticamente el separador del CSV
+    - load_all_csvs: Lee y combina todos los CSV mensuales
     - clean_dataframe: Aplica las 6 reglas de limpieza definidas
     - split_tables: Genera FACT_CONSUMO y DIM_CLIENTE_UBICACION
     - mark_outliers: Detecta outliers con z-score > 3
     - standardize_text: Convierte texto a mayúsculas y aplica strip
-    - validar_calidad: Calcula tasa de registros válidos (KPI OE1)
-    - guardar_resultados: Persiste CSV limpio y tablas separadas
+    - validate_quality: Calcula tasa de registros válidos (KPI OE1)
+    - save_results: Persiste CSV limpio y tablas separadas
 
 Variables de entorno:
     - MAX_RECORDS_PER_FILE: Máximo de filas por archivo CSV (ej: 100000)
@@ -28,12 +28,12 @@ from dotenv import load_dotenv
 load_dotenv()
 warnings.filterwarnings("ignore")
 
-RUTA_CSV = os.environ.get(
+csv_originales_path = os.environ.get(
     "RUTA_CSV_ORIGINALES",
     os.path.join(os.path.dirname(__file__), "..", "data", "originales")
 )
-RUTA_DATA = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
-RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "..", "serving_layer"))
+data_path = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
+serving_path = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "..", "serving_layer"))
 
 
 def detect_separator(file_path, num_lines=5):
@@ -48,15 +48,15 @@ def detect_separator(file_path, num_lines=5):
         str: El separador detectado (';', ',' o '\\t').
     """
     try:
-        with open(file_path, "r", encoding="latin-1", errors="ignore") as f:
-            lines = [f.readline() for _ in range(num_lines)]
-        text = "".join(lines)
-        scores = {}
-        for sep in [";", ",", "\t"]:
-            scores[sep] = text.count(sep)
-        separator = max(scores, key=scores.get)
-        print(f"  Separador detectado: '{separator}' (puntaje={scores[separator]})")
-        return separator
+        with open(file_path, "r", encoding="latin-1", errors="ignore") as text_file:
+            sample_lines = [text_file.readline() for _ in range(num_lines)]
+        sample_text = "".join(sample_lines)
+        separator_scores = {}
+        for candidate_separator in [";", ",", "\t"]:
+            separator_scores[candidate_separator] = sample_text.count(candidate_separator)
+        best_separator = max(separator_scores, key=separator_scores.get)
+        print(f"  Separador detectado: '{best_separator}' (puntaje={separator_scores[best_separator]})")
+        return best_separator
     except Exception as e:
         print(f"  Error detectando separador: {e}")
         return ";"
@@ -67,7 +67,7 @@ def load_all_csvs(path=None, max_records_per_file=None):
     Lee todos los archivos CSV de la carpeta y los combina en un DataFrame.
 
     Parametros:
-        path (str): Directorio con los CSV. Usa RUTA_CSV por defecto.
+        path (str): Directorio con los CSV. Usa csv_originales_path por defecto.
         max_records_per_file (int): Máximo de filas a leer por archivo CSV.
                                     Si es None, usa MAX_RECORDS_PER_FILE de entorno.
 
@@ -75,14 +75,14 @@ def load_all_csvs(path=None, max_records_per_file=None):
         pd.DataFrame: DataFrame combinado, o None si no hay archivos.
     """
     if path is None:
-        path = RUTA_CSV
+        path = csv_originales_path
     try:
-        files = sorted(glob.glob(os.path.join(path, "*.csv")))
-        if not files:
+        csv_files = sorted(glob.glob(os.path.join(path, "*.csv")))
+        if not csv_files:
             print("ERROR: No se encontraron archivos CSV en:", path)
             return None
 
-        # ── Muestreo por archivo ────────────────────────────────
+        # ── muestreo por archivo ────────────────────────────────
         if max_records_per_file is None:
             max_records_per_file = os.environ.get("MAX_RECORDS_PER_FILE")
             if max_records_per_file is not None:
@@ -91,40 +91,40 @@ def load_all_csvs(path=None, max_records_per_file=None):
             else:
                 max_records_per_file = os.environ.get("MAX_RECORDS")
                 if max_records_per_file is not None:
-                    max_records_per_file = max(1, int(max_records_per_file) // len(files))
+                    max_records_per_file = max(1, int(max_records_per_file) // len(csv_files))
                     print(f"MAX_RECORDS={max_records_per_file:,} filas por archivo (proporcional)")
 
-        print(f"Archivos encontrados: {len(files)}")
-        dataframes = []
-        for file_path in files:
+        print(f"Archivos encontrados: {len(csv_files)}")
+        monthly_dfs = []
+        for csv_file_path in csv_files:
             try:
-                sep = detect_separator(file_path)
-                # Probar encoding latin-1, fallback a utf-8
+                separator = detect_separator(csv_file_path)
+                # probar encoding latin-1, fallback a utf-8
                 try:
-                    df = pd.read_csv(
-                        file_path, sep=sep, encoding="latin-1", low_memory=False,
+                    monthly_df = pd.read_csv(
+                        csv_file_path, sep=separator, encoding="latin-1", low_memory=False,
                         on_bad_lines="skip", nrows=max_records_per_file
                     )
                 except UnicodeDecodeError:
-                    df = pd.read_csv(
-                        file_path, sep=sep, encoding="utf-8", low_memory=False,
+                    monthly_df = pd.read_csv(
+                        csv_file_path, sep=separator, encoding="utf-8", low_memory=False,
                         on_bad_lines="skip", nrows=max_records_per_file
                     )
-                dataframes.append(df)
-                print(f"  OK {os.path.basename(file_path)}: {len(df):,} filas x {len(df.columns)} cols")
+                monthly_dfs.append(monthly_df)
+                print(f"  OK {os.path.basename(csv_file_path)}: {len(monthly_df):,} filas x {len(monthly_df.columns)} cols")
             except Exception as e:
-                print(f"  ERROR en {os.path.basename(file_path)}: {e}")
+                print(f"  ERROR en {os.path.basename(csv_file_path)}: {e}")
 
-        if not dataframes:
+        if not monthly_dfs:
             print("ERROR: No se pudo leer ningun archivo.")
             return None
 
-        combined_df = pd.concat(dataframes, ignore_index=True)
+        combined_df = pd.concat(monthly_dfs, ignore_index=True)
         print(f"\nTotal filas combinadas: {len(combined_df):,}")
         print(f"Columnas detectadas: {combined_df.columns.tolist()}")
         return combined_df
     except Exception as e:
-        print(f"ERROR en cargar_todos_los_csv: {e}")
+        print(f"ERROR en load_all_csvs: {e}")
         return None
 
 
@@ -143,16 +143,16 @@ def standardize_text(raw_df, text_columns=None):
     try:
         if text_columns is None:
             text_columns = raw_df.select_dtypes(include=["object"]).columns.tolist()
-        for col in text_columns:
-            if col in raw_df.columns:
-                raw_df[col] = raw_df[col].astype(str).str.strip().str.upper()
+        for column_name in text_columns:
+            if column_name in raw_df.columns:
+                raw_df[column_name] = raw_df[column_name].astype(str).str.strip().str.upper()
         return raw_df
     except Exception as e:
         print(f"ERROR en standardize_text: {e}")
         return raw_df
 
 
-def clean_dataframe(df):
+def clean_dataframe(raw_df):
     """
     Aplica las 6 reglas de limpieza definidas en el proyecto.
 
@@ -165,98 +165,98 @@ def clean_dataframe(df):
         6. Estandarizacion de texto (mayusculas y strip)
 
     Parametros:
-        df (pd.DataFrame): DataFrame crudo.
+        raw_df (pd.DataFrame): DataFrame crudo.
 
     Retorna:
         pd.DataFrame: DataFrame limpio con columna 'outlier' bool.
     """
     try:
         print("\n=== INICIO LIMPIEZA ===")
-        # Limpiar BOM en nombres de columnas
-        df.columns = df.columns.str.replace('ï»¿', '', regex=False).str.strip()
-        filas_inicial = len(df)
+        # limpiar bom en nombres de columnas
+        raw_df.columns = raw_df.columns.str.replace('ï»¿', '', regex=False).str.strip()
+        initial_row_count = len(raw_df)
 
-        # ── 4. Conversion de tipos ──────────────────────────────────
-        # Columnas de fecha
-        cols_fecha = [
+        # ── 4. conversion de tipos ──────────────────────────────────
+        # columnas de fecha
+        date_columns = [
             "FECHA_EMISION", "FECHA_VENCIMIENTO",
             "FECHA_CONSUMO_DESDE", "FECHA_CONSUMO_HASTA"
         ]
-        for col in cols_fecha:
-            if col in df.columns:
-                df[col] = pd.to_datetime(
-                    df[col], format="%Y%m%d", errors="coerce"
+        for date_column in date_columns:
+            if date_column in raw_df.columns:
+                raw_df[date_column] = pd.to_datetime(
+                    raw_df[date_column], format="%Y%m%d", errors="coerce"
                 )
 
-        # Columnas numericas
-        for col in ["IMPORTE", "CONSUMO"]:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
+        # columnas numericas
+        for numeric_column in ["IMPORTE", "CONSUMO"]:
+            if numeric_column in raw_df.columns:
+                raw_df[numeric_column] = pd.to_numeric(raw_df[numeric_column], errors="coerce")
 
-        if "PERIODO" in df.columns:
-            df["PERIODO"] = pd.to_numeric(df["PERIODO"], errors="coerce").astype("Int64")
+        if "PERIODO" in raw_df.columns:
+            raw_df["PERIODO"] = pd.to_numeric(raw_df["PERIODO"], errors="coerce").astype("Int64")
 
-        if "NRO_SERVICIO" in df.columns:
-            df["NRO_SERVICIO"] = pd.to_numeric(df["NRO_SERVICIO"], errors="coerce").astype("Int64")
+        if "NRO_SERVICIO" in raw_df.columns:
+            raw_df["NRO_SERVICIO"] = pd.to_numeric(raw_df["NRO_SERVICIO"], errors="coerce").astype("Int64")
 
         print(f"  Conversion de tipos OK")
 
-        # ── 2. Eliminacion de nulos en IMPORTE y CONSUMO ────────────
-        filas_antes_nulos = len(df)
-        df = df.dropna(subset=["IMPORTE", "CONSUMO"])
-        nulos_eliminados = filas_antes_nulos - len(df)
-        print(f"  Nulos eliminados (IMPORTE/CONSUMO): {nulos_eliminados:,}")
+        # ── 2. eliminacion de nulos en importe y consumo ────────────
+        rows_before_null_drop = len(raw_df)
+        raw_df = raw_df.dropna(subset=["IMPORTE", "CONSUMO"])
+        null_rows_removed = rows_before_null_drop - len(raw_df)
+        print(f"  Nulos eliminados (IMPORTE/CONSUMO): {null_rows_removed:,}")
 
-        # ── 3. Filtrado de valores invalidos (<= 0) ─────────────────
-        filas_antes_invalidos = len(df)
-        df = df[df["CONSUMO"] > 0]
-        df = df[df["IMPORTE"] > 0]
-        invalidos_eliminados = filas_antes_invalidos - len(df)
-        print(f"  Valores <=0 eliminados: {invalidos_eliminados:,}")
+        # ── 3. filtrado de valores invalidos (<= 0) ─────────────────
+        rows_before_invalid_drop = len(raw_df)
+        raw_df = raw_df[raw_df["CONSUMO"] > 0]
+        raw_df = raw_df[raw_df["IMPORTE"] > 0]
+        invalid_rows_removed = rows_before_invalid_drop - len(raw_df)
+        print(f"  Valores <=0 eliminados: {invalid_rows_removed:,}")
 
-        # ── 6. Estandarizacion de texto ─────────────────────────────
-        df = standardize_text(df)
+        # ── 6. estandarizacion de texto ─────────────────────────────
+        raw_df = standardize_text(raw_df)
 
-        # ── 5. Deteccion de outliers (z-score > 3) ─────────────────
-        df = mark_outliers(df)
+        # ── 5. deteccion de outliers (z-score > 3) ─────────────────
+        raw_df = mark_outliers(raw_df)
 
-        # ── Reporte final ───────────────────────────────────────────
-        filas_final = len(df)
-        eliminadas = filas_inicial - filas_final
-        tasa_validos = (filas_final / filas_inicial) * 100 if filas_inicial > 0 else 0
-        print(f"\n  Filas iniciales: {filas_inicial:,}")
-        print(f"  Filas finales:   {filas_final:,}")
-        print(f"  Eliminadas:      {eliminadas:,}")
-        print(f"  Tasa validez:    {tasa_validos:.2f}%")
-        print(f"  Outliers marcados: {df['outlier'].sum():,}")
+        # ── reporte final ───────────────────────────────────────────
+        final_row_count = len(raw_df)
+        rows_removed = initial_row_count - final_row_count
+        valid_rate_pct = (final_row_count / initial_row_count) * 100 if initial_row_count > 0 else 0
+        print(f"\n  Filas iniciales: {initial_row_count:,}")
+        print(f"  Filas finales:   {final_row_count:,}")
+        print(f"  Eliminadas:      {rows_removed:,}")
+        print(f"  Tasa validez:    {valid_rate_pct:.2f}%")
+        print(f"  Outliers marcados: {raw_df['outlier'].sum():,}")
         print("=== FIN LIMPIEZA ===\n")
 
-        return df
+        return raw_df
     except Exception as e:
         print(f"ERROR en clean_dataframe: {e}")
-        return df
+        return raw_df
 
 
-def mark_outliers(raw_df, ZSCORE_THRESHOLD=3):
+def mark_outliers(raw_df, zscore_threshold=3):
     """
     Marca outliers usando z-score > umbral en CONSUMO e IMPORTE.
 
     Parametros:
         raw_df (pd.DataFrame): DataFrame con columnas CONSUMO e IMPORTE.
-        ZSCORE_THRESHOLD (int/float): Numero de desviaciones estandar para el corte.
+        zscore_threshold (int/float): Numero de desviaciones estandar para el corte.
 
     Retorna:
         pd.DataFrame: Con columna adicional 'outlier' (bool).
     """
     try:
         raw_df["outlier"] = False
-        for col in ["CONSUMO", "IMPORTE"]:
-            if col in raw_df.columns:
-                mean = raw_df[col].mean()
-                std_dev = raw_df[col].std()
-                if std_dev > 0:
-                    z_score = (raw_df[col] - mean).abs() / std_dev
-                    raw_df["outlier"] = raw_df["outlier"] | (z_score > ZSCORE_THRESHOLD)
+        for numeric_column in ["CONSUMO", "IMPORTE"]:
+            if numeric_column in raw_df.columns:
+                column_mean = raw_df[numeric_column].mean()
+                column_std = raw_df[numeric_column].std()
+                if column_std > 0:
+                    zscore = (raw_df[numeric_column] - column_mean).abs() / column_std
+                    raw_df["outlier"] = raw_df["outlier"] | (zscore > zscore_threshold)
         return raw_df
     except Exception as e:
         print(f"ERROR en mark_outliers: {e}")
@@ -264,47 +264,47 @@ def mark_outliers(raw_df, ZSCORE_THRESHOLD=3):
         return raw_df
 
 
-def split_tables(df):
+def split_tables(raw_df):
     """
     Separa el DataFrame en FACT_CONSUMO y DIM_CLIENTE_UBICACION.
-    Usa NRO_DOC_FAC como identificador único porque NRO_SERVICIO 
+    Usa NRO_DOC_FAC como identificador único porque NRO_SERVICIO
     está anonimizado con 0 en el dataset real de Hidrandina.
     """
     try:
         print("=== SEPARANDO TABLAS ===")
 
-        # Limpiar BOM en nombres de columnas
-        df.columns = df.columns.str.replace('ï»¿', '', regex=False).str.strip()
+        # limpiar bom en nombres de columnas
+        raw_df.columns = raw_df.columns.str.replace('ï»¿', '', regex=False).str.strip()
 
-        # ── FACT_CONSUMO ─────────────────────────────────────────
-        cols_fact = [
+        # ── fact_consumo ─────────────────────────────────────────
+        fact_columns = [
             "NRO_DOC_FAC", "PERIODO", "CONSUMO", "IMPORTE",
             "FECHA_EMISION", "FECHA_VENCIMIENTO",
             "FECHA_CONSUMO_DESDE", "FECHA_CONSUMO_HASTA"
         ]
-        cols_fact_ok = [c for c in cols_fact if c in df.columns]
-        fact = df[cols_fact_ok].copy()
-        fact = fact.dropna(subset=["NRO_DOC_FAC"])
-        fact = fact.drop_duplicates(subset=["NRO_DOC_FAC", "PERIODO"])
-        print(f"  FACT_CONSUMO: {len(fact):,} filas x {len(fact.columns)} cols")
+        available_fact_columns = [c for c in fact_columns if c in raw_df.columns]
+        fact_df = raw_df[available_fact_columns].copy()
+        fact_df = fact_df.dropna(subset=["NRO_DOC_FAC"])
+        fact_df = fact_df.drop_duplicates(subset=["NRO_DOC_FAC", "PERIODO"])
+        print(f"  FACT_CONSUMO: {len(fact_df):,} filas x {len(fact_df.columns)} cols")
 
-        # ── DIM_CLIENTE_UBICACION ────────────────────────────────
-        cols_dim = [
+        # ── dim_cliente_ubicacion ────────────────────────────────
+        dim_columns = [
             "NRO_DOC_FAC", "DEPARTAMENTO", "PROVINCIA", "DISTRITO",
             "UBIGEO", "TARIFA", "CARTERA", "UNIDAD_NEGOCIO"
         ]
-        cols_dim_ok = [c for c in cols_dim if c in df.columns]
-        dim = df[cols_dim_ok].copy()
-        dim = dim.dropna(subset=["NRO_DOC_FAC"])
-        dim = dim.drop_duplicates(subset=["NRO_DOC_FAC"])
-        print(f"  DIM_CLIENTE_UBICACION: {len(dim):,} filas x {len(dim.columns)} cols")
+        available_dim_columns = [c for c in dim_columns if c in raw_df.columns]
+        dim_df = raw_df[available_dim_columns].copy()
+        dim_df = dim_df.dropna(subset=["NRO_DOC_FAC"])
+        dim_df = dim_df.drop_duplicates(subset=["NRO_DOC_FAC"])
+        print(f"  DIM_CLIENTE_UBICACION: {len(dim_df):,} filas x {len(dim_df.columns)} cols")
         print("=== TABLAS SEPARADAS ===\n")
 
-        return fact, dim
+        return fact_df, dim_df
 
     except Exception as e:
         print(f"ERROR en split_tables: {e}")
-        return df, pd.DataFrame()
+        return raw_df, pd.DataFrame()
 
 
 def validate_quality(fact_df, dim_df, total_original=0):
@@ -312,38 +312,38 @@ def validate_quality(fact_df, dim_df, total_original=0):
     Calcula indicadores de calidad (KPI OE1).
 
     Parametros:
-        fact (pd.DataFrame): FACT_CONSUMO.
-        dim (pd.DataFrame): DIM_CLIENTE_UBICACION.
+        fact_df (pd.DataFrame): FACT_CONSUMO.
+        dim_df (pd.DataFrame): DIM_CLIENTE_UBICACION.
         total_original (int): Filas originales antes de limpieza.
 
     Retorna:
         dict: Diccionario con metricas de calidad.
     """
     try:
-        total_fact = len(fact_df)
-        nulos_consumo = fact_df["CONSUMO"].isna().sum()
-        nulos_importe = fact_df["IMPORTE"].isna().sum()
-        consumo_cero = (fact_df["CONSUMO"] <= 0).sum()
-        importe_cero = (fact_df["IMPORTE"] <= 0).sum()
-        fact_sin_dim = total_fact - fact_df["NRO_DOC_FAC"].isin(dim_df["NRO_DOC_FAC"]).sum()
+        total_fact_rows = len(fact_df)
+        null_consumption_count = fact_df["CONSUMO"].isna().sum()
+        null_billing_count = fact_df["IMPORTE"].isna().sum()
+        zero_consumption_count = (fact_df["CONSUMO"] <= 0).sum()
+        zero_billing_count = (fact_df["IMPORTE"] <= 0).sum()
+        fact_without_dim_count = total_fact_rows - fact_df["NRO_DOC_FAC"].isin(dim_df["NRO_DOC_FAC"]).sum()
 
-        tasa_validez_pct = round(
-            total_fact / max(total_original, 1) * 100, 2
+        valid_rate_pct = round(
+            total_fact_rows / max(total_original, 1) * 100, 2
         )
 
-        metrics = {
+        quality_metrics = {
             "total_filas_originales":  int(total_original),
-            "total_fact_consumo":      int(total_fact),
+            "total_fact_consumo":      int(total_fact_rows),
             "total_dim_cliente":       int(len(dim_df)),
-            "nulos_consumo":           int(nulos_consumo),
-            "nulos_importe":           int(nulos_importe),
-            "consumo_cero_o_negativo": int(consumo_cero),
-            "importe_cero_o_negativo": int(importe_cero),
-            "fact_sin_dim_asociada":   int(fact_sin_dim),
-            "tasa_validez_pct":        tasa_validez_pct,
-            "oe1_cumplido":            bool(tasa_validez_pct >= 85.0)
+            "nulos_consumo":           int(null_consumption_count),
+            "nulos_importe":           int(null_billing_count),
+            "consumo_cero_o_negativo": int(zero_consumption_count),
+            "importe_cero_o_negativo": int(zero_billing_count),
+            "fact_sin_dim_asociada":   int(fact_without_dim_count),
+            "tasa_validez_pct":        valid_rate_pct,
+            "oe1_cumplido":            bool(valid_rate_pct >= 85.0)
         }
-        return metrics
+        return quality_metrics
     except Exception as e:
         print(f"ERROR en validate_quality: {e}")
         return {}
@@ -359,47 +359,47 @@ def save_results(fact_df, dim_df, raw_cleaned_df=None):
         raw_cleaned_df (pd.DataFrame): DataFrame completo limpio (opcional).
     """
     try:
-        os.makedirs(RUTA_DATA, exist_ok=True)
-        os.makedirs(RUTA_SERVING, exist_ok=True)
+        os.makedirs(data_path, exist_ok=True)
+        os.makedirs(serving_path, exist_ok=True)
 
         if raw_cleaned_df is not None:
-            path_cleaned = os.path.join(RUTA_DATA, "hidrandina_limpio.csv")
-            raw_cleaned_df.to_csv(path_cleaned, index=False, encoding="utf-8-sig")
-            print(f"  CSV limpio guardado: {path_cleaned}")
+            cleaned_csv_path = os.path.join(data_path, "hidrandina_limpio.csv")
+            raw_cleaned_df.to_csv(cleaned_csv_path, index=False, encoding="utf-8-sig")
+            print(f"  CSV limpio guardado: {cleaned_csv_path}")
 
-        path_fact = os.path.join(RUTA_DATA, "FACT_CONSUMO.csv")
-        fact_df.to_csv(path_fact, index=False, encoding="utf-8-sig")
-        print(f"  FACT_CONSUMO guardado: {path_fact} ({len(fact_df):,} filas)")
+        fact_csv_path = os.path.join(data_path, "FACT_CONSUMO.csv")
+        fact_df.to_csv(fact_csv_path, index=False, encoding="utf-8-sig")
+        print(f"  FACT_CONSUMO guardado: {fact_csv_path} ({len(fact_df):,} filas)")
 
-        path_dim = os.path.join(RUTA_DATA, "DIM_CLIENTE_UBICACION.csv")
-        dim_df.to_csv(path_dim, index=False, encoding="utf-8-sig")
-        print(f"  DIM_CLIENTE_UBICACION guardado: {path_dim} ({len(dim_df):,} filas)")
+        dim_csv_path = os.path.join(data_path, "DIM_CLIENTE_UBICACION.csv")
+        dim_df.to_csv(dim_csv_path, index=False, encoding="utf-8-sig")
+        print(f"  DIM_CLIENTE_UBICACION guardado: {dim_csv_path} ({len(dim_df):,} filas)")
 
         print("  Archivos guardados correctamente.")
     except Exception as e:
         print(f"ERROR en save_results: {e}")
 
 
-def generate_quality_report(metrics, path=None):
+def generate_quality_report(quality_metrics, path=None):
     """
     Genera un reporte JSON con las metricas de calidad.
 
     Parametros:
-        metrics (dict): Diccionario con metricas de validate_quality.
+        quality_metrics (dict): Diccionario con metricas de validate_quality.
         path (str): Ruta de salida. Por defecto serving_layer/reporte_calidad.json.
     """
     try:
         if path is None:
-            path = os.path.join(RUTA_SERVING, "reporte_calidad.json")
+            path = os.path.join(serving_path, "reporte_calidad.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         import json
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8") as report_file:
             json.dump(
-                {k: (bool(v) if isinstance(v, (bool, np.bool_)) else 
-                     int(v) if isinstance(v, (np.integer,)) else
-                     float(v) if isinstance(v, (np.floating,)) else v)
-                 for k, v in metrics.items()},
-                f, indent=2, ensure_ascii=False
+                {key: (bool(value) if isinstance(value, (bool, np.bool_)) else
+                       int(value) if isinstance(value, (np.integer,)) else
+                       float(value) if isinstance(value, (np.floating,)) else value)
+                 for key, value in quality_metrics.items()},
+                report_file, indent=2, ensure_ascii=False
             )
         print(f"  Reporte calidad guardado: {path}")
     except Exception as e:
@@ -420,7 +420,7 @@ def execute(max_records_per_file=None):
                                     Si es None, usa MAX_RECORDS_PER_FILE de entorno.
 
     Retorna:
-        tuple: (fact_df, dim_df, metrics) o (None, None, None) si falla.
+        tuple: (fact_df, dim_df, quality_metrics) o (None, None, None) si falla.
     """
     print("=" * 60)
     print("LOADER — Carga y limpieza del dataset Hidrandina")
@@ -431,7 +431,7 @@ def execute(max_records_per_file=None):
         print("ERROR: No hay datos para procesar.")
         return None, None, None
 
-    total_original = len(raw_df)
+    total_original_rows = len(raw_df)
 
     raw_df = clean_dataframe(raw_df)
     if raw_df.empty:
@@ -443,18 +443,18 @@ def execute(max_records_per_file=None):
         print("ERROR: FACT_CONSUMO vacia.")
         return None, None, None
 
-    metrics = validate_quality(fact_df, dim_df, total_original)
+    quality_metrics = validate_quality(fact_df, dim_df, total_original_rows)
     save_results(fact_df, dim_df, raw_cleaned_df=raw_df)
-    generate_quality_report(metrics)
+    generate_quality_report(quality_metrics)
 
     print("\nRESUMEN DE CALIDAD (OE1):")
-    print(f"  Tasa de validez: {metrics.get('tasa_validez_pct', 0):.2f}%")
-    print(f"  OE1 cumplido: {'SI' if metrics.get('oe1_cumplido') else 'NO'}")
+    print(f"  Tasa de validez: {quality_metrics.get('tasa_validez_pct', 0):.2f}%")
+    print(f"  OE1 cumplido: {'SI' if quality_metrics.get('oe1_cumplido') else 'NO'}")
     print("=" * 60)
 
-    return fact_df, dim_df, metrics
+    return fact_df, dim_df, quality_metrics
 
 
 if __name__ == "__main__":
-    # Limitado a 100k filas por archivo para evitar sobrecarga de memoria
+    # limitado a 100k filas por archivo para evitar sobrecarga de memoria
     execute(max_records_per_file=100000)

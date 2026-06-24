@@ -28,10 +28,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── Rutas del proyecto ────────────────────────────────────────────────
-RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "serving_layer"))
+serving_path = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__), "serving_layer"))
 
 # ── Estado global del pipeline ────────────────────────────────────────
-PIPELINE_STATE = {
+pipeline_state = {
     "inicio": None,
     "fin": None,
     "etapas": {},
@@ -59,15 +59,15 @@ def print_footer():
     """
     Imprime el footer de finalizacion del pipeline.
     """
-    duration = PIPELINE_STATE.get("duracion_total", 0)
+    duration = pipeline_state.get("duracion_total", 0)
     print()
     print("=" * 70)
     print(f"  PIPELINE FINALIZADO")
     print(f"  Duracion total: {duration:.2f} segundos")
-    print(f"  Estado: {'EXITOSO' if PIPELINE_STATE['exitoso'] else 'FALLIDO'}")
-    if PIPELINE_STATE["errores"]:
-        print(f"  Errores: {len(PIPELINE_STATE['errores'])}")
-        for err in PIPELINE_STATE["errores"][-3:]:
+    print(f"  Estado: {'EXITOSO' if pipeline_state['exitoso'] else 'FALLIDO'}")
+    if pipeline_state["errores"]:
+        print(f"  Errores: {len(pipeline_state['errores'])}")
+        for err in pipeline_state["errores"][-3:]:
             print(f"    - {err}")
     print("=" * 70)
     print()
@@ -83,14 +83,14 @@ def register_stage(name, success, duration, details=None):
         duration (float): Duracion en segundos.
         details (dict): Detalles adicionales de la etapa.
     """
-    PIPELINE_STATE["etapas"][name] = {
+    pipeline_state["etapas"][name] = {
         "exitosa": success,
         "duracion_seg": round(duration, 2),
         "timestamp": datetime.now().isoformat(),
         "detalles": details or {}
     }
     if not success:
-        PIPELINE_STATE["errores"].append(
+        pipeline_state["errores"].append(
             f"Etapa '{name}' fallo tras {duration:.2f}s"
         )
 
@@ -266,29 +266,29 @@ def generate_final_report():
         dict: Reporte completo del pipeline.
     """
     try:
-        total_duration = time.time() - PIPELINE_STATE["inicio"]
-        PIPELINE_STATE["duracion_total"] = total_duration
-        PIPELINE_STATE["fin"] = datetime.now().isoformat()
+        total_duration = time.time() - pipeline_state["inicio"]
+        pipeline_state["duracion_total"] = total_duration
+        pipeline_state["fin"] = datetime.now().isoformat()
 
         successful_stages = sum(
-            1 for e in PIPELINE_STATE["etapas"].values() if e["exitosa"]
+            1 for e in pipeline_state["etapas"].values() if e["exitosa"]
         )
-        total_stages = len(PIPELINE_STATE["etapas"])
-        PIPELINE_STATE["exitoso"] = (
+        total_stages = len(pipeline_state["etapas"])
+        pipeline_state["exitoso"] = (
             successful_stages == total_stages and total_stages > 0
         )
 
         report = {
             "pipeline": "Hidrandina Lambda - Deteccion de Anomalias",
-            "inicio": datetime.fromtimestamp(PIPELINE_STATE["inicio"]).isoformat(),
-            "fin": PIPELINE_STATE["fin"],
+            "inicio": datetime.fromtimestamp(pipeline_state["inicio"]).isoformat(),
+            "fin": pipeline_state["fin"],
             "duracion_total_seg": round(total_duration, 2),
             "etapas_ejecutadas": total_stages,
             "etapas_exitosas": successful_stages,
             "etapas_fallidas": total_stages - successful_stages,
-            "exitoso": PIPELINE_STATE["exitoso"],
-            "etapas": PIPELINE_STATE["etapas"],
-            "errores": PIPELINE_STATE["errores"]
+            "exitoso": pipeline_state["exitoso"],
+            "etapas": pipeline_state["etapas"],
+            "errores": pipeline_state["errores"]
         }
 
         # Cargar reportes individuales de cada capa si existen
@@ -298,7 +298,7 @@ def generate_final_report():
             "reporte_streaming.json",
             "reporte_kpis.json"
         ]:
-            path = os.path.join(RUTA_SERVING, report_name)
+            path = os.path.join(serving_path, report_name)
             if os.path.exists(path):
                 try:
                     with open(path, "r", encoding="utf-8") as f:
@@ -307,7 +307,7 @@ def generate_final_report():
                     pass
 
         # Guardar reporte final
-        report_path = os.path.join(RUTA_SERVING, "reporte_pipeline_completo.json")
+        report_path = os.path.join(serving_path, "reporte_pipeline_completo.json")
         os.makedirs(os.path.dirname(report_path), exist_ok=True)
         with open(report_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
@@ -427,7 +427,7 @@ def main():
             return
 
     # Registrar inicio
-    PIPELINE_STATE["inicio"] = time.time()
+    pipeline_state["inicio"] = time.time()
 
     # Mapa de etapas
     def get_producer_mode():

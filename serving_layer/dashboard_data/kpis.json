@@ -1,1 +1,1 @@
-{"registros_procesados": 107596, "loader_validez_pct": 91.45, "anomalias_reales": 45625, "tasa_anomalia_pct": 42.404, "consumo_total_kwh": 23867704.2043, "periodo_label": "Periodo de streaming actual", "alertas_criticas": 45625, "facturacion_total_soles": 21496946.4}
+{"registros_procesados": 107596, "loader_validez_pct": 91.45, "anomalias_reales": 39004, "tasa_anomalia_pct": 36.2504, "consumo_total_kwh": 23867704.2043, "periodo_label": "Periodo de streaming actual", "alertas_criticas": 39004, "facturacion_total_soles": 21496946.4}

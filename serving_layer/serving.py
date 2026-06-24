@@ -40,17 +40,17 @@ warnings.filterwarnings("ignore")
 
 
 # ── Rutas del proyecto ───────────────────────────────────────────────
-RUTA_DATA = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
-RUTA_SERVING = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__)))
-RUTA_SPEED = os.environ.get(
+data_path = os.environ.get("RUTA_DATA", os.path.join(os.path.dirname(__file__), "..", "data"))
+serving_path = os.environ.get("RUTA_SERVING", os.path.join(os.path.dirname(__file__)))
+speed_path = os.environ.get(
     "RUTA_SPEED",
     os.path.join(os.path.dirname(__file__), "..", "speed_layer")
 )
 # Normalizar la ruta
-RUTA_SPEED = os.path.normpath(RUTA_SPEED)
+speed_path = os.path.normpath(speed_path)
 
 # ── Esquema de 17 columnas de FACT_ANOMALIAS_CONSUMO ─────────────────
-COLUMNAS_FACT_ANOMALIAS = [
+fact_anomalias_columns = [
     "id_anomalia",
     "nro_servicio",
     "periodo",
@@ -85,11 +85,18 @@ def cargar_datos_batch():
     """
     try:
         # 1) CSV directo (escrito por spark_batch.py)
-        ruta_csv = os.path.join(RUTA_SERVING, "batch_results", "tmp_estadisticas_historicas.csv")
+        ruta_csv = os.path.join(serving_path, "batch_results", "tmp_estadisticas_historicas.csv")
         if os.path.isfile(ruta_csv):
-            df = pd.read_csv(ruta_csv, encoding="utf-8-sig")
-            print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(df):,} filas [CSV]")
-            return df
+            batch_stats_df = pd.read_csv(ruta_csv, encoding="utf-8-sig")
+            print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(batch_stats_df):,} filas [CSV]")
+            return batch_stats_df
+
+        # 2) Parquet (formato actual de spark_batch.py para esta tabla)
+        ruta_parquet = os.path.join(serving_path, "batch_results", "tmp_estadisticas_historicas")
+        if os.path.isdir(ruta_parquet):
+            batch_stats_df = pd.read_parquet(ruta_parquet)
+            print(f"  Batch (TMP_ESTADISTICAS_HISTORICAS): {len(batch_stats_df):,} filas [Parquet]")
+            return batch_stats_df
 
         print("  No se encontraron datos batch.")
         return None
@@ -111,18 +118,18 @@ def cargar_datos_streaming():
         import pyarrow.parquet as pq
 
         # 1) CSV en serving_layer (copiado por speed_layer)
-        ruta_csv_serving = os.path.join(RUTA_SERVING, "datos_streaming.csv")
+        ruta_csv_serving = os.path.join(serving_path, "datos_streaming.csv")
         if os.path.isfile(ruta_csv_serving):
-            df = pd.read_csv(ruta_csv_serving, encoding="utf-8-sig")
-            print(f"  Streaming (anomalias): {len(df):,} filas [CSV serving]")
-            return df
+            streaming_anomalies_df = pd.read_csv(ruta_csv_serving, encoding="utf-8-sig")
+            print(f"  Streaming (anomalias): {len(streaming_anomalies_df):,} filas [CSV serving]")
+            return streaming_anomalies_df
             
         # 2) CSV en root
-        ruta_csv_root = os.path.join(os.path.dirname(RUTA_SERVING), "FACT_ANOMALIAS_STREAM.csv")
+        ruta_csv_root = os.path.join(os.path.dirname(serving_path), "FACT_ANOMALIAS_STREAM.csv")
         if os.path.isfile(ruta_csv_root):
-            df = pd.read_csv(ruta_csv_root, encoding="utf-8-sig")
-            print(f"  Streaming (anomalias): {len(df):,} filas [CSV root]")
-            return df
+            streaming_anomalies_df = pd.read_csv(ruta_csv_root, encoding="utf-8-sig")
+            print(f"  Streaming (anomalias): {len(streaming_anomalies_df):,} filas [CSV root]")
+            return streaming_anomalies_df
 
         print("  No se encontraron datos streaming.")
         print(f"  Buscado en: {ruta_csv_serving}")
@@ -163,10 +170,10 @@ def generar_fact_anomalias_consumo(df_stream, df_batch=None):
             print("  No hay datos de streaming para procesar.")
             return pd.DataFrame()
 
-        df = df_stream.copy()
+        fact_df = df_stream.copy()
 
         # Normalizar todas las columnas a minusculas primero
-        df.columns = [c.lower() for c in df.columns]
+        fact_df.columns = [c.lower() for c in fact_df.columns]
 
         # ── Mapeo de nombres ──────────────────────────────────────
         mapeo = {
@@ -178,13 +185,13 @@ def generar_fact_anomalias_consumo(df_stream, df_batch=None):
             "tarifa": "tarifa",
             "cartera": "cartera",
         }
-        df = df.rename(columns=mapeo)
+        fact_df = fact_df.rename(columns=mapeo)
 
         # ── Calcular tipo_anomalia y nivel_riesgo si no existen ──
-        if "tipo_anomalia" not in df.columns or df["tipo_anomalia"].isna().all():
-            z = pd.to_numeric(df.get("zscore_consumo", pd.Series([0]*len(df))), errors="coerce").fillna(0)
-            pct = pd.to_numeric(df.get("porcentaje_variacion", pd.Series([0]*len(df))), errors="coerce").fillna(0)
-            consumo = pd.to_numeric(df.get("consumo_actual", pd.Series([0]*len(df))), errors="coerce").fillna(0)
+        if "tipo_anomalia" not in fact_df.columns or fact_df["tipo_anomalia"].isna().all():
+            z = pd.to_numeric(fact_df.get("zscore_consumo", pd.Series([0]*len(fact_df))), errors="coerce").fillna(0)
+            pct = pd.to_numeric(fact_df.get("porcentaje_variacion", pd.Series([0]*len(fact_df))), errors="coerce").fillna(0)
+            consumo = pd.to_numeric(fact_df.get("consumo_actual", pd.Series([0]*len(fact_df))), errors="coerce").fillna(0)
 
             conditions = [
                 z > 3,
@@ -198,75 +205,75 @@ def generar_fact_anomalias_consumo(df_stream, df_batch=None):
                 "Incremento brusco",
                 "Consumo sospechosamente bajo",
             ]
-            df["tipo_anomalia"] = np.select(conditions, choices, default="Variacion moderada")
-            df.loc[consumo > 500, "tipo_anomalia"] = df.loc[consumo > 500, "tipo_anomalia"].replace(
+            fact_df["tipo_anomalia"] = np.select(conditions, choices, default="Variacion moderada")
+            fact_df.loc[consumo > 500, "tipo_anomalia"] = fact_df.loc[consumo > 500, "tipo_anomalia"].replace(
                 "Variacion moderada", "Alerta consumo critico > 500 kWh"
             )
 
-        if "nivel_riesgo" not in df.columns or df["nivel_riesgo"].isna().all():
-            z = pd.to_numeric(df.get("zscore_consumo", pd.Series([0]*len(df))), errors="coerce").fillna(0)
-            consumo = pd.to_numeric(df.get("consumo_actual", pd.Series([0]*len(df))), errors="coerce").fillna(0)
-            df["nivel_riesgo"] = np.where(z > 3, "Alto",
+        if "nivel_riesgo" not in fact_df.columns or fact_df["nivel_riesgo"].isna().all():
+            z = pd.to_numeric(fact_df.get("zscore_consumo", pd.Series([0]*len(fact_df))), errors="coerce").fillna(0)
+            consumo = pd.to_numeric(fact_df.get("consumo_actual", pd.Series([0]*len(fact_df))), errors="coerce").fillna(0)
+            fact_df["nivel_riesgo"] = np.where(z > 3, "Alto",
                                  np.where((z >= 2) & (z <= 3), "Medio", "Bajo"))
-            df.loc[consumo > 500, "nivel_riesgo"] = u"Cr\u00edtico"
+            fact_df.loc[consumo > 500, "nivel_riesgo"] = u"Cr\u00edtico"
 
         # ── Garantizar columnas base ──────────────────────────────
         for col in ["nro_servicio", "periodo", "consumo_actual",
                      "importe_actual", "distrito", "tarifa", "cartera"]:
-            if col not in df.columns:
-                df[col] = None
+            if col not in fact_df.columns:
+                fact_df[col] = None
 
         # ── Garantizar columnas estadisticas ──────────────────────
         for col in ["consumo_promedio_historico", "importe_promedio_historico",
                      "desviacion_consumo", "zscore_consumo", "porcentaje_variacion"]:
-            if col not in df.columns:
-                df[col] = 0.0
+            if col not in fact_df.columns:
+                fact_df[col] = 0.0
 
         # ── Garantizar columnas de clasificacion ──────────────────
-        if "tipo_anomalia" not in df.columns:
-            df["tipo_anomalia"] = "Sin clasificar"
-        if "nivel_riesgo" not in df.columns:
-            df["nivel_riesgo"] = "Bajo"
-        if "fecha_deteccion" not in df.columns:
-            df["fecha_deteccion"] = datetime.now()
+        if "tipo_anomalia" not in fact_df.columns:
+            fact_df["tipo_anomalia"] = "Sin clasificar"
+        if "nivel_riesgo" not in fact_df.columns:
+            fact_df["nivel_riesgo"] = "Bajo"
+        if "fecha_deteccion" not in fact_df.columns:
+            fact_df["fecha_deteccion"] = datetime.now()
 
         # flag_anomalia = TRUE en el 100% de las filas (KPI OE4)
-        df["flag_anomalia"] = True
+        fact_df["flag_anomalia"] = True
 
         # ── UUID unico por fila ───────────────────────────────────
-        df["id_anomalia"] = [str(uuid.uuid4()) for _ in range(len(df))]
+        fact_df["id_anomalia"] = [str(uuid.uuid4()) for _ in range(len(fact_df))]
 
         # ── Forzar tipos numericos ────────────────────────────────
-        df["zscore_consumo"] = pd.to_numeric(df["zscore_consumo"], errors="coerce").fillna(0)
-        df["consumo_actual"] = pd.to_numeric(df["consumo_actual"], errors="coerce")
-        df["importe_actual"] = pd.to_numeric(df["importe_actual"], errors="coerce")
+        fact_df["zscore_consumo"] = pd.to_numeric(fact_df["zscore_consumo"], errors="coerce").fillna(0)
+        fact_df["consumo_actual"] = pd.to_numeric(fact_df["consumo_actual"], errors="coerce")
+        fact_df["importe_actual"] = pd.to_numeric(fact_df["importe_actual"], errors="coerce")
 
         # ── fecha_deteccion a string ISO para CSV ─────────────────
-        df["fecha_deteccion"] = (
-            pd.to_datetime(df["fecha_deteccion"], errors="coerce")
+        fact_df["fecha_deteccion"] = (
+            pd.to_datetime(fact_df["fecha_deteccion"], errors="coerce")
             .dt.strftime("%Y-%m-%d %H:%M:%S")
         )
 
         # ── Crear columnas faltantes y reordenar ──────────────────
-        for col in COLUMNAS_FACT_ANOMALIAS:
-            if col not in df.columns:
-                df[col] = True if col == "flag_anomalia" else None
+        for col in fact_anomalias_columns:
+            if col not in fact_df.columns:
+                fact_df[col] = True if col == "flag_anomalia" else None
 
-        df_final = df[COLUMNAS_FACT_ANOMALIAS].copy()
+        final_fact_df = fact_df[fact_anomalias_columns].copy()
 
         # Reforzar flag_anomalia (seguridad)
-        df_final["flag_anomalia"] = True
+        final_fact_df["flag_anomalia"] = True
 
-        print(f"  FACT_ANOMALIAS_CONSUMO: {len(df_final):,} filas")
-        print(f"  Columnas ({len(df_final.columns)}): {df_final.columns.tolist()}")
+        print(f"  FACT_ANOMALIAS_CONSUMO: {len(final_fact_df):,} filas")
+        print(f"  Columnas ({len(final_fact_df.columns)}): {final_fact_df.columns.tolist()}")
 
         # Verificacion rapida de nulos en columnas criticas
-        nulos_z = df_final["zscore_consumo"].isna().sum()
-        nulos_f = (df_final["flag_anomalia"] != True).sum()
+        nulos_z = final_fact_df["zscore_consumo"].isna().sum()
+        nulos_f = (final_fact_df["flag_anomalia"] != True).sum()
         print(f"  Nulos en zscore_consumo: {nulos_z}")
         print(f"  Filas con flag_anomalia != True: {nulos_f}")
 
-        return df_final
+        return final_fact_df
 
     except Exception as e:
         print(f"ERROR en generar_fact_anomalias_consumo: {e}")
@@ -431,7 +438,7 @@ def generar_dashboard(df_fact, df_tendencia_original=None, ruta_salida=None):
     """
     try:
         if ruta_salida is None:
-            ruta_salida = os.path.join(RUTA_SERVING, "dashboard.png")
+            ruta_salida = os.path.join(serving_path, "dashboard.png")
 
         if df_fact.empty:
             print("  No hay datos para el dashboard.")
@@ -583,27 +590,27 @@ def guardar_resultados(df_fact, res_distrito, res_tarifa, res_cartera):
         res_cartera (pd.DataFrame): RESUMEN_ANOMALIAS_CARTERA.
     """
     try:
-        os.makedirs(RUTA_SERVING, exist_ok=True)
+        os.makedirs(serving_path, exist_ok=True)
 
         archivos = []
 
         if not df_fact.empty:
-            ruta = os.path.join(RUTA_SERVING, "FACT_ANOMALIAS_CONSUMO.csv")
+            ruta = os.path.join(serving_path, "FACT_ANOMALIAS_CONSUMO.csv")
             df_fact.to_csv(ruta, index=False, encoding="utf-8-sig")
             archivos.append(ruta)
 
         if not res_distrito.empty:
-            ruta = os.path.join(RUTA_SERVING, "RESUMEN_ANOMALIAS_DISTRITO.csv")
+            ruta = os.path.join(serving_path, "RESUMEN_ANOMALIAS_DISTRITO.csv")
             res_distrito.to_csv(ruta, index=False, encoding="utf-8-sig")
             archivos.append(ruta)
 
         if not res_tarifa.empty:
-            ruta = os.path.join(RUTA_SERVING, "RESUMEN_ANOMALIAS_TARIFA.csv")
+            ruta = os.path.join(serving_path, "RESUMEN_ANOMALIAS_TARIFA.csv")
             res_tarifa.to_csv(ruta, index=False, encoding="utf-8-sig")
             archivos.append(ruta)
 
         if not res_cartera.empty:
-            ruta = os.path.join(RUTA_SERVING, "RESUMEN_ANOMALIAS_CARTERA.csv")
+            ruta = os.path.join(serving_path, "RESUMEN_ANOMALIAS_CARTERA.csv")
             res_cartera.to_csv(ruta, index=False, encoding="utf-8-sig")
             archivos.append(ruta)
 
@@ -643,7 +650,7 @@ def generar_reporte_kpis(df_fact, metrica_oe4, res_distrito, res_tarifa, res_car
         dict: KPIs completos con tipos nativos Python.
     """
     try:
-        ruta = os.path.join(RUTA_SERVING, "reporte_kpis.json")
+        ruta = os.path.join(serving_path, "reporte_kpis.json")
         os.makedirs(os.path.dirname(ruta), exist_ok=True)
 
         if df_fact.empty:
@@ -738,64 +745,70 @@ def enriquecer_con_batch(df_stream, ruta_batch_csv):
     usamos muestreo estadistico directamente.
     """
     try:
-        df = df_stream.copy()
-        df.columns = [c.lower() for c in df.columns]
+        enriched_df = df_stream.copy()
+        enriched_df.columns = [c.lower() for c in enriched_df.columns]
         print("  Asignando dimensiones desde estadisticas historicas...")
-        return _asignar_distritos_desde_estadisticas(df, ruta_batch_csv)
+        return _asignar_distritos_desde_estadisticas(enriched_df, ruta_batch_csv)
     except Exception as e:
         print(f"  Error en enriquecimiento: {e}")
         return df_stream
 
 
-def _asignar_distritos_desde_estadisticas(df, ruta_batch_csv):
+def _asignar_distritos_desde_estadisticas(events_df, ruta_batch_csv):
     """
     Asigna DISTRITO, TARIFA, CARTERA muestreando de
     tmp_estadisticas_historicas.csv de forma proporcional.
     """
     try:
-        ruta_stats = os.path.join(
+        ruta_batch_results = os.path.join(
             os.environ.get("RUTA_SERVING", os.path.dirname(__file__)),
-            "batch_results", "tmp_estadisticas_historicas.csv"
+            "batch_results"
         )
-        if not os.path.isfile(ruta_stats):
-            print("  tmp_estadisticas_historicas.csv no encontrado")
-            return df
+        ruta_stats_csv = os.path.join(ruta_batch_results, "tmp_estadisticas_historicas.csv")
+        ruta_stats_parquet = os.path.join(ruta_batch_results, "tmp_estadisticas_historicas")
 
-        stats = pd.read_csv(ruta_stats, encoding="utf-8-sig")
-        stats.columns = [c.lower() for c in stats.columns]
+        if os.path.isfile(ruta_stats_csv):
+            stats_df = pd.read_csv(ruta_stats_csv, encoding="utf-8-sig")
+        elif os.path.isdir(ruta_stats_parquet):
+            stats_df = pd.read_parquet(ruta_stats_parquet)
+        else:
+            print("  tmp_estadisticas_historicas no encontrado (ni CSV ni Parquet)")
+            return events_df
+
+        stats_df.columns = [c.lower() for c in stats_df.columns]
 
         # Muestrear con reemplazo para asignar dimensiones
-        n = len(df)
-        sample = stats.sample(n=n, replace=True, random_state=42).reset_index(drop=True)
+        n = len(events_df)
+        sample = stats_df.sample(n=n, replace=True, random_state=42).reset_index(drop=True)
 
-        df = df.copy()
-        df["distrito"] = sample["distrito"].values
-        df["tarifa"] = sample["tarifa"].values
-        df["cartera"] = sample["cartera"].values
-        df["consumo_promedio_historico"] = sample["consumo_promedio"].values
-        df["importe_promedio_historico"] = sample["importe_promedio"].values
-        df["desviacion_consumo"] = sample["consumo_std"].values
+        events_df = events_df.copy()
+        events_df["distrito"] = sample["distrito"].values
+        events_df["tarifa"] = sample["tarifa"].values
+        events_df["cartera"] = sample["cartera"].values
+        events_df["consumo_promedio_historico"] = sample["consumo_promedio"].values
+        events_df["importe_promedio_historico"] = sample["importe_promedio"].values
+        events_df["desviacion_consumo"] = sample["consumo_std"].values
 
         # Recalcular zscore con los promedios asignados
-        consumo = pd.to_numeric(df.get("consumo_actual", 0), errors="coerce").fillna(0)
-        prom = pd.to_numeric(df["consumo_promedio_historico"], errors="coerce").fillna(0)
-        std = pd.to_numeric(df["desviacion_consumo"], errors="coerce").fillna(1)
+        consumo = pd.to_numeric(events_df.get("consumo_actual", 0), errors="coerce").fillna(0)
+        prom = pd.to_numeric(events_df["consumo_promedio_historico"], errors="coerce").fillna(0)
+        std = pd.to_numeric(events_df["desviacion_consumo"], errors="coerce").fillna(1)
         std = std.replace(0, 1)
-        df["zscore_consumo"] = ((consumo - prom) / std).round(4)
+        events_df["zscore_consumo"] = ((consumo - prom) / std).round(4)
         # Acotar a rango razonable [-5, 5] para evitar outliers extremos
         # causados por la asignacion aleatoria de dimensiones
-        df["zscore_consumo"] = df["zscore_consumo"].clip(-5, 5)
+        events_df["zscore_consumo"] = events_df["zscore_consumo"].clip(-5, 5)
 
-        df["porcentaje_variacion"] = (((consumo - prom) / prom.replace(0,1)) * 100).round(2)
+        events_df["porcentaje_variacion"] = (((consumo - prom) / prom.replace(0,1)) * 100).round(2)
         # Acotar porcentaje_variacion a [-200, 500] por la misma razon
-        df["porcentaje_variacion"] = df["porcentaje_variacion"].clip(-200, 500)
+        events_df["porcentaje_variacion"] = events_df["porcentaje_variacion"].clip(-200, 500)
 
-        print(f"  Dimensiones asignadas desde estadisticas: {len(stats)} grupos disponibles")
-        return df
+        print(f"  Dimensiones asignadas desde estadisticas: {len(stats_df)} grupos disponibles")
+        return events_df
 
     except Exception as e:
         print(f"  Error asignando dimensiones: {e}")
-        return df
+        return events_df
 
 
 # =====================================================================
@@ -846,7 +859,7 @@ def generar_dashboard_data(df_fact, res_distrito, res_tarifa, res_cartera, kpis_
     usando los datos reales ya procesados del pipeline.
     """
     try:
-        ruta_dd = os.path.join(RUTA_SERVING, "dashboard_data")
+        ruta_dd = os.path.join(serving_path, "dashboard_data")
         os.makedirs(ruta_dd, exist_ok=True)
         print("\n--- Generando archivos para dashboard interactivo ---")
 
@@ -878,7 +891,7 @@ def generar_dashboard_data(df_fact, res_distrito, res_tarifa, res_cartera, kpis_
                 df_fact[df_fact["zscore_consumo"].abs() > 3]
                 .groupby("distrito").size().to_dict()
             )
-            ruta_dim = os.path.join(RUTA_DATA, "DIM_CLIENTE_UBICACION.csv")
+            ruta_dim = os.path.join(data_path, "DIM_CLIENTE_UBICACION.csv")
             mapa_depto = {}
             mapa_ubigeo = {}
             if os.path.isfile(ruta_dim):
@@ -890,7 +903,7 @@ def generar_dashboard_data(df_fact, res_distrito, res_tarifa, res_cartera, kpis_
                 mapa_ubigeo = dim.set_index("distrito")["ubigeo"].to_dict()
 
             # Cargar centroides reales desde el GeoJSON para ubicaciones precisas
-            ruta_gj = os.path.join(RUTA_SERVING, "dashboard_data", "peru_distritos.geojson")
+            ruta_gj = os.path.join(serving_path, "dashboard_data", "peru_distritos.geojson")
             centroides = _cargar_centroides_geojson(ruta_gj)
 
             for distrito, total_reg in conteo_distrito.items():
@@ -930,7 +943,7 @@ def generar_dashboard_data(df_fact, res_distrito, res_tarifa, res_cartera, kpis_
 
         # 4. batch_trend.json
         trend_out = []
-        ruta_tend = os.path.join(RUTA_SERVING, "batch_results", "tendencia_mensual.csv")
+        ruta_tend = os.path.join(serving_path, "batch_results", "tendencia_mensual.csv")
         if os.path.isfile(ruta_tend):
             tend = pd.read_csv(ruta_tend, encoding="utf-8-sig")
             tend.columns = [c.lower() for c in tend.columns]
@@ -1007,7 +1020,7 @@ def generar_dashboard_data(df_fact, res_distrito, res_tarifa, res_cartera, kpis_
             json.dump(summaries_out, f, ensure_ascii=False)
 
         # 10. choropleth_data.json (para mapa coropletico en dashboard.html)
-        choropleth_out = generar_choropleth_data(heatmap, RUTA_SERVING)
+        choropleth_out = generar_choropleth_data(heatmap, serving_path)
         with open(os.path.join(ruta_dd, "choropleth_data.json"), "w", encoding="utf-8") as f:
             json.dump(choropleth_out, f, ensure_ascii=False)
 
@@ -1088,7 +1101,7 @@ def ejecutar():
 
     # ── Paso 1b: Enriquecer stream con dimensiones del batch ──────
     print("\n--- Enriqueciendo stream con dimensiones batch ---")
-    ruta_batch_csv = os.path.join(RUTA_SERVING, "batch_results",
+    ruta_batch_csv = os.path.join(serving_path, "batch_results",
                                    "tmp_estadisticas_historicas.csv")
     df_stream = enriquecer_con_batch(df_stream, ruta_batch_csv)
 
@@ -1114,8 +1127,8 @@ def ejecutar():
     # Intentar cargar FACT_CONSUMO original para tendencia historica completa
     df_tendencia = None
     for ruta_intento in [
-        os.path.join(RUTA_DATA, "FACT_CONSUMO.csv"),
-        os.path.join(RUTA_DATA, "FACT_CONSUMO.CSV"),
+        os.path.join(data_path, "FACT_CONSUMO.csv"),
+        os.path.join(data_path, "FACT_CONSUMO.CSV"),
     ]:
         if os.path.isfile(ruta_intento):
             try:
@@ -1143,7 +1156,7 @@ def ejecutar():
     print()
     print("=" * 60)
     print("  SERVING LAYER COMPLETADO")
-    print(f"  Outputs en: {RUTA_SERVING}")
+    print(f"  Outputs en: {serving_path}")
     print("=" * 60)
     return True
 

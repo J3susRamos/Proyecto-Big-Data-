@@ -713,17 +713,10 @@ tbody tr:hover td { background: rgba(68,138,255,0.04); }
   </div>
   <div class="chart-card animate-in" style="animation-delay:0.15s" id="riskCard">
     <div class="chart-header">
-      <span class="chart-title">📊 Distribución de Riesgo (Corregida)</span>
+      <span class="chart-title">📊 Distribución de Riesgo</span>
       <span class="chart-badge stream">STREAM</span>
     </div>
     <div class="chart-container tall" id="riskPlot"></div>
-    <div style="margin-top:8px; padding:10px 14px; background:rgba(0,230,118,0.05); border:1px solid rgba(0,230,118,0.15); border-radius:8px;">
-      <div style="font-size:10.5px; color:var(--accent-green); font-weight:600;">✅ CORRECCIÓN APLICADA</div>
-      <div style="font-size:10px; color:var(--text-muted); margin-top:3px;">
-        Solo registros con z-score &gt; 3 son anomalías reales.<br>
-        El resto es consumo normal dentro de la desviación estándar.
-      </div>
-    </div>
   </div>
 </div>
 
@@ -881,6 +874,7 @@ const DATA_DIR = 'dashboard_data';
 const API_BASE = '';
 let eventCount = 0;
 let prevAlertIds = new Set();
+let alertToastQueue = [];
 
 
 /* ── Utilidades ────────────────────────────────────────────────── */
@@ -949,7 +943,9 @@ function renderAlertasPanel(data) {
   }
 
   const nuevos = data.data.filter(a => !prevAlertIds.has(a.window_start + a.DISTRITO));
-  nuevos.forEach(a => showAlertToast(a));
+  // Encolar las alertas nuevas (reales) para revelarlas de a una,
+  // simulando llegada en vivo, en vez de mostrarlas todas de golpe.
+  alertToastQueue.push(...nuevos);
 
   data.data.forEach(a => prevAlertIds.add(a.window_start + a.DISTRITO));
 
@@ -1026,7 +1022,7 @@ function renderKPIs(kpis, heatmapData) {
     ? Number(kpis.tasa_anomalia_pct).toFixed(2)
     : '0.00';
   document.getElementById('kpiTasaAnomalia').innerHTML =
-    '<strong>' + pct + '%</strong> del total — tasa corregida (z&gt;3)';
+    '<strong>' + pct + '%</strong> del total — anomalias reales (z&gt;3)';
 
   // 3. Consumo Total kWh
   const consumo = kpis.consumo_total_kwh || 0;
@@ -1568,11 +1564,19 @@ async function refreshLive() {
   fetchAlertasAPI();
 }
 
+/* Revela una alerta real de la cola cada 20s, simulando llegada en vivo */
+function revealNextAlertToast() {
+  if (alertToastQueue.length === 0) return;
+  const alerta = alertToastQueue.shift();
+  showAlertToast(alerta);
+}
+
 // Iniciar
 loadDashboard();
 updateTimestamp();
 fetchAlertasAPI();
 setInterval(refreshLive, 5000);
+setInterval(revealNextAlertToast, 20000);
 setInterval(updateTimestamp, 1000);
 </script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
