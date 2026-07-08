@@ -1,4 +1,4 @@
- """
+"""
 Servidor FastAPI para el dashboard web de Hidrandina y el Simulador en Tiempo Real.
 Sirve serving_layer/ en http://localhost:8050/dashboard.html
 Y expone la API de simulacion en http://localhost:8050/api/predict
